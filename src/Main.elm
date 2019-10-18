@@ -1,27 +1,38 @@
 module Main exposing (main)
 
 import Browser
-import Css.Global exposing (body, global)
+import Browser.Events exposing (onKeyUp)
 import Html exposing (Html, p, text)
-import Svg exposing (..)
-import Svg.Attributes exposing (..)
+import Json.Decode as D
+import Svg exposing (svg)
+import Svg.Attributes exposing (viewBox)
 
 
 main =
-    Browser.sandbox
+    Browser.element
         { init = init
         , update = update
         , view = view
+        , subscriptions = subscriptions
         }
 
 
-type alias Model =
-    { mode : String }
+
+-- MODEL
 
 
-init : Model
-init =
-    { mode = "normal" }
+type Model
+    = WaitingForNodePlacement
+    | Normal
+
+
+init : () -> ( Model, Cmd Msg )
+init _ =
+    ( Normal, Cmd.none )
+
+
+
+-- UPDATE
 
 
 type Msg
@@ -29,14 +40,39 @@ type Msg
     | ReturnToNormal
 
 
-update : Msg -> Model -> Model
+update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         WaitForPlacement ->
-            { model | mode = "waitForPlacement" }
+            ( WaitingForNodePlacement, Cmd.none )
 
         ReturnToNormal ->
-            { model | mode = "normal" }
+            ( Normal, Cmd.none )
+
+
+
+-- SUBSCRIPTIONS
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    onKeyUp (D.map mapKeyDecoder keyDecoder)
+
+
+mapKeyDecoder : String -> Msg
+mapKeyDecoder key =
+    case key of
+        "n" ->
+            WaitingForNodePlacement
+
+
+keyDecoder : D.Decoder String
+keyDecoder =
+    D.field "key" D.string
+
+
+
+-- VIEW
 
 
 view : Model -> Html Msg

@@ -9,6 +9,7 @@ Install Elm:
 Then run:
 
     npm install
+    elm install
 
 And finally:
 
