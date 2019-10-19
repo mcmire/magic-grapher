@@ -2,19 +2,14 @@
 
 ## Getting started
 
-Install Elm:
+Run:
 
-    brew install elm
+    bin/setup
 
-Then run:
-
-    npm install
-    elm install
-
-And finally:
+Now run:
 
     npm run start
 
-Now visit:
+And finally visit:
 
     http://localhost:1234/
