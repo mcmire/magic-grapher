@@ -231,6 +231,14 @@ Please follow the installation instructions on the official Elm guide to do so:
     "
     exit 1
   fi
+
+  if ! has-executable elm-json; then
+    npm install -g elm-json
+
+    if has-executable nodenv; then
+      nodenv rehash
+    fi
+  fi
 }
 
 run-provisions() {
