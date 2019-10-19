@@ -1,6 +1,8 @@
 import { Elm } from "./Main.elm";
-import "normalize.css";
+
+import "reset.css";
 import "./index.css";
+import "./styles/main.css";
 
 Elm.Main.init({
   node: document.querySelector("main")
