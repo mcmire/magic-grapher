@@ -82,20 +82,25 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         WaitForPlacement ->
-            ( { model | state = CapturingMouseMovementsWhile WaitingForNodePlacement }, Cmd.none )
+            ( { model | state = CapturingMouseMovementsWhile WaitingForNodePlacement }
+            , Cmd.none
+            )
 
         ReturnToWaitingForFirstAction ->
             ( { model | state = WaitingForFirstAction }, Cmd.none )
 
         PlaceNodeAt pos ->
-            ( { model
-                | state = CapturingMouseMovementsWhile (PlacingNodeAt pos)
-              }
+            ( { model | state = CapturingMouseMovementsWhile (PlacingNodeAt pos) }
             , Cmd.none
             )
 
         AdjustViewboxFromInitial viewport ->
-            ( { model | viewboxWidth = floor viewport.viewport.width, viewboxHeight = floor viewport.viewport.height }, Cmd.none )
+            ( { model
+                | viewboxWidth = floor viewport.viewport.width
+                , viewboxHeight = floor viewport.viewport.height
+              }
+            , Cmd.none
+            )
 
         AdjustViewboxFromResize width height ->
             ( { model | viewboxWidth = width, viewboxHeight = height }, Cmd.none )
@@ -106,6 +111,10 @@ update msg model =
 
 
 -- SUBSCRIPTIONS
+
+
+type alias Position =
+    { x : Int, y : Int }
 
 
 subscriptions : Model -> Sub Msg
@@ -161,10 +170,6 @@ keyDecoder =
     D.field "key" D.string
 
 
-type alias Position =
-    { x : Int, y : Int }
-
-
 mouseDecoder : D.Decoder Position
 mouseDecoder =
     D.map2 Position (D.field "clientX" D.int) (D.field "clientY" D.int)
@@ -185,16 +190,15 @@ view model =
         [ H.div [ HA.class debug ] [ H.text ("State: " ++ modelName model) ]
         , S.svg
             [ SA.class world
-            , SA.viewBox (joinIntsWith " " [ 0, 0, model.viewboxWidth, model.viewboxHeight ])
+            , SA.viewBox
+                (joinIntsWith
+                    " "
+                    [ 0, 0, model.viewboxWidth, model.viewboxHeight ]
+                )
             , SA.preserveAspectRatio "none"
             ]
             (groupForNodeToBePlaced model)
         ]
-
-
-joinIntsWith : String -> List Int -> String
-joinIntsWith separator ints =
-    String.join separator (List.map String.fromInt ints)
 
 
 groupForNodeToBePlaced : Model -> List (H.Html Msg)
@@ -242,3 +246,12 @@ modelName model =
 
         WaitingForFirstAction ->
             "Waiting for first action"
+
+
+
+--- UTILITIES
+
+
+joinIntsWith : String -> List Int -> String
+joinIntsWith separator ints =
+    String.join separator (List.map String.fromInt ints)
