@@ -3,7 +3,7 @@ module Main exposing (main)
 import Basics exposing (Int, floor)
 import Browser
 import Browser.Dom exposing (Viewport, getViewport)
-import Browser.Events exposing (onKeyUp, onMouseMove, onResize)
+import Browser.Events exposing (onKeyUp, onResize)
 import Color exposing (hsla, toCssString)
 import Debug exposing (log, toString)
 import Html as H
@@ -14,6 +14,7 @@ import String exposing (concat)
 import Styles.Main exposing (debug, world)
 import Svg as S
 import Svg.Attributes as SA
+import Svg.Events as SE
 import Task
 
 
@@ -32,20 +33,22 @@ main =
 
 type MovingMouse
     = WaitingForNodePlacement
-    | PlacingNodeAt Position
+    | PositioningNodeAt Position
 
 
 type State
     = CapturingMouseMovementsWhile MovingMouse
+    | EditingNodeText Node
     | WaitingForFirstAction
 
 
 type alias Node =
-    { x : Int, y : Int, text : String }
+    { id : Int, x : Int, y : Int, text : String }
 
 
 type alias Model =
     { state : State
+    , lastNodeId : Int
     , nodes : List Node
     , nodeBeingPositioned : Maybe Node
     , viewboxWidth : Int
@@ -56,6 +59,7 @@ type alias Model =
 init : () -> ( Model, Cmd Msg )
 init _ =
     ( { state = WaitingForFirstAction
+      , lastNodeId = -1
       , nodes = []
       , nodeBeingPositioned = Nothing
       , viewboxWidth = 0
@@ -72,6 +76,7 @@ init _ =
 type Msg
     = WaitForPlacement
     | ReturnToWaitingForFirstAction
+    | PositionNodeAt Position
     | PlaceNodeAt Position
     | AdjustViewboxFromInitial Viewport
     | AdjustViewboxFromResize Int Int
@@ -89,8 +94,24 @@ update msg model =
         ReturnToWaitingForFirstAction ->
             ( { model | state = WaitingForFirstAction }, Cmd.none )
 
+        PositionNodeAt pos ->
+            ( { model | state = CapturingMouseMovementsWhile (PositioningNodeAt pos) }
+            , Cmd.none
+            )
+
         PlaceNodeAt pos ->
-            ( { model | state = CapturingMouseMovementsWhile (PlacingNodeAt pos) }
+            let
+                nextNodeId =
+                    model.lastNodeId + 1
+
+                newNode =
+                    newNodeAt pos nextNodeId
+            in
+            ( { model
+                | nodes = model.nodes ++ [ newNode ]
+                , lastNodeId = nextNodeId
+                , state = EditingNodeText newNode
+              }
             , Cmd.none
             )
 
@@ -107,6 +128,11 @@ update msg model =
 
         DoNothing ->
             ( model, Cmd.none )
+
+
+newNodeAt : Position -> Int -> Node
+newNodeAt pos id =
+    { id = id, x = pos.x, y = pos.y, text = "" }
 
 
 
@@ -131,12 +157,13 @@ specificSubscriptions : Model -> List (Sub Msg)
 specificSubscriptions model =
     case model.state of
         CapturingMouseMovementsWhile _ ->
-            [ onMouseMove (D.map mapMouseDecoder mouseDecoder)
-            , onKeyUp (D.map mapKeyDecoderWhenCapturingMouseMove keyDecoder)
-            ]
+            [ onKeyUp (D.map mapKeyDecoderWhenCapturingMouseMove keyDecoder) ]
 
         WaitingForFirstAction ->
             [ onKeyUp (D.map mapKeyDecoderForWaitingForFirstAction keyDecoder) ]
+
+        _ ->
+            []
 
 
 mapKeyDecoderForWaitingForFirstAction : String -> Msg
@@ -175,11 +202,6 @@ mouseDecoder =
     D.map2 Position (D.field "clientX" D.int) (D.field "clientY" D.int)
 
 
-mapMouseDecoder : Position -> Msg
-mapMouseDecoder pos =
-    PlaceNodeAt pos
-
-
 
 -- VIEW
 
@@ -189,22 +211,61 @@ view model =
     H.div []
         [ H.div [ HA.class debug ] [ H.text ("State: " ++ modelName model) ]
         , S.svg
-            [ SA.class world
-            , SA.viewBox
-                (joinIntsWith
-                    " "
-                    [ 0, 0, model.viewboxWidth, model.viewboxHeight ]
-                )
-            , SA.preserveAspectRatio "none"
-            ]
-            (groupForNodeToBePlaced model)
+            (svgAttributes model)
+            (nodeElements model ++ nodeElementToBePlaced model)
         ]
 
 
-groupForNodeToBePlaced : Model -> List (H.Html Msg)
-groupForNodeToBePlaced model =
+svgAttributes model =
+    constantSvgAttributes model
+        ++ svgAttributesWhileCapturingMouseMovements model
+
+
+constantSvgAttributes model =
+    [ SA.class world
+    , SA.viewBox
+        (joinIntsWith
+            " "
+            [ 0, 0, model.viewboxWidth, model.viewboxHeight ]
+        )
+    , SA.preserveAspectRatio "none"
+    ]
+
+
+svgAttributesWhileCapturingMouseMovements model =
     case model.state of
-        CapturingMouseMovementsWhile (PlacingNodeAt pos) ->
+        CapturingMouseMovementsWhile _ ->
+            [ SE.on "mousemove" (D.map PositionNodeAt mouseDecoder)
+            , SE.on "click" (D.map PlaceNodeAt mouseDecoder)
+            ]
+
+        _ ->
+            []
+
+
+nodeElements : Model -> List (H.Html Msg)
+nodeElements model =
+    List.map nodeElement model.nodes
+
+
+nodeElement : Node -> S.Svg Msg
+nodeElement node =
+    S.ellipse
+        [ SA.cx (String.fromInt node.x)
+        , SA.cy (String.fromInt node.y)
+        , SA.rx "50"
+        , SA.ry "30"
+        , SA.fill "none"
+        , SA.stroke (toCssString (hsla 0.6 0.7 0.75 1))
+        , SA.strokeWidth "1px"
+        ]
+        []
+
+
+nodeElementToBePlaced : Model -> List (H.Html Msg)
+nodeElementToBePlaced model =
+    case model.state of
+        CapturingMouseMovementsWhile (PositioningNodeAt pos) ->
             [ S.g
                 [ SA.transform
                     (concat
@@ -222,9 +283,7 @@ groupForNodeToBePlaced model =
                     , SA.rx "50"
                     , SA.ry "30"
                     , SA.fill "none"
-
-                    --, SA.stroke (toCssString (hsla 0.6 0.7 0.75 0.4))
-                    , SA.stroke "black"
+                    , SA.stroke (toCssString (hsla 0.6 0.7 0.75 0.6))
                     , SA.strokeWidth "1px"
                     ]
                     []
@@ -241,8 +300,11 @@ modelName model =
         CapturingMouseMovementsWhile WaitingForNodePlacement ->
             "Waiting for node placement"
 
-        CapturingMouseMovementsWhile (PlacingNodeAt pos) ->
-            "Placing node at: " ++ toString pos
+        CapturingMouseMovementsWhile (PositioningNodeAt pos) ->
+            "Positioning node at: " ++ toString pos
+
+        EditingNodeText node ->
+            "Editing text for node " ++ String.fromInt node.id
 
         WaitingForFirstAction ->
             "Waiting for first action"
