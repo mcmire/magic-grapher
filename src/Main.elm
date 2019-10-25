@@ -1,6 +1,6 @@
 module Main exposing (main)
 
-import Basics exposing (Int, floor)
+import Basics exposing (floor)
 import Browser
 import Browser.Dom exposing (Viewport, getViewport)
 import Browser.Events exposing (onKeyUp, onResize)
@@ -10,12 +10,14 @@ import Html as H
 import Html.Attributes as HA
 import Json.Decode as D
 import List
+import RoundedRectangle exposing (roundedRectCenteredAt)
 import String exposing (concat)
 import Styles.Main exposing (debug, world)
 import Svg as S
 import Svg.Attributes as SA
 import Svg.Events as SE
 import Task
+import Types exposing (Dimensions, Position, Positionable)
 
 
 main =
@@ -43,7 +45,7 @@ type State
 
 
 type alias Node =
-    { id : Int, x : Int, y : Int, text : String }
+    Positionable { id : Int, text : String }
 
 
 type alias Model =
@@ -139,10 +141,6 @@ newNodeAt pos id =
 -- SUBSCRIPTIONS
 
 
-type alias Position =
-    { x : Int, y : Int }
-
-
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch (commonSubscriptions ++ specificSubscriptions model)
@@ -199,7 +197,7 @@ keyDecoder =
 
 mouseDecoder : D.Decoder Position
 mouseDecoder =
-    D.map2 Position (D.field "clientX" D.int) (D.field "clientY" D.int)
+    D.map2 Position (D.field "clientX" D.float) (D.field "clientY" D.float)
 
 
 
@@ -212,7 +210,7 @@ view model =
         [ H.div [ HA.class debug ] [ H.text ("State: " ++ modelName model) ]
         , S.svg
             (svgAttributes model)
-            (nodeElements model ++ nodeElementToBePlaced model)
+            (nodeElementToBePlaced model ++ placedNodeElements model)
         ]
 
 
@@ -243,25 +241,6 @@ svgAttributesWhileCapturingMouseMovements model =
             []
 
 
-nodeElements : Model -> List (H.Html Msg)
-nodeElements model =
-    List.map nodeElement model.nodes
-
-
-nodeElement : Node -> S.Svg Msg
-nodeElement node =
-    S.ellipse
-        [ SA.cx (String.fromInt node.x)
-        , SA.cy (String.fromInt node.y)
-        , SA.rx "50"
-        , SA.ry "30"
-        , SA.fill "none"
-        , SA.stroke (toCssString (hsla 0.6 0.7 0.75 1))
-        , SA.strokeWidth "1px"
-        ]
-        []
-
-
 nodeElementToBePlaced : Model -> List (H.Html Msg)
 nodeElementToBePlaced model =
     case model.state of
@@ -270,28 +249,36 @@ nodeElementToBePlaced model =
                 [ SA.transform
                     (concat
                         [ "translate("
-                        , String.fromInt pos.x
+                        , String.fromFloat pos.x
                         , " "
-                        , String.fromInt pos.y
+                        , String.fromFloat pos.y
                         , ")"
                         ]
                     )
                 ]
-                [ S.ellipse
-                    [ SA.cx "0"
-                    , SA.cy "0"
-                    , SA.rx "50"
-                    , SA.ry "30"
-                    , SA.fill "none"
-                    , SA.stroke (toCssString (hsla 0.6 0.7 0.75 0.6))
-                    , SA.strokeWidth "1px"
-                    ]
-                    []
+                [ nodeElement
+                    { x = 0, y = 0 }
+                    [ SA.stroke (toCssString (hsla 0.6 0.7 0.75 0.6)) ]
                 ]
             ]
 
         _ ->
             []
+
+
+placedNodeElements : Model -> List (S.Svg msg)
+placedNodeElements model =
+    List.map placedNodeElement model.nodes
+
+
+placedNodeElement : Node -> S.Svg msg
+placedNodeElement node =
+    nodeElement node [ SA.stroke (toCssString (hsla 0.6 0.3 0.3 1)) ]
+
+
+nodeElement : Positionable thing -> List (S.Attribute msg) -> S.Svg msg
+nodeElement position attrs =
+    roundedRectCenteredAt position (Dimensions 210 90) 5 attrs
 
 
 modelName : Model -> String
