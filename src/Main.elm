@@ -6,6 +6,13 @@ import Browser.Dom exposing (Viewport, getViewport)
 import Browser.Events exposing (onKeyUp, onResize)
 import Color exposing (hsla)
 import Color.Convert exposing (colorToCssHsla)
+import Debouncer.Messages as Debouncer
+    exposing
+        ( Debouncer
+        , provideInput
+        , throttle
+        , toDebouncer
+        )
 import Debug exposing (log, toString)
 import Html as H
 import Html.Attributes as HA
@@ -56,6 +63,7 @@ type alias Model =
     , nodeBeingPositioned : Maybe Node
     , viewbox : Dimensions
     , mouse : { pos : Maybe Position, cursor : String }
+    , debouncer : Debouncer Msg
     }
 
 
@@ -67,6 +75,7 @@ init _ =
       , nodeBeingPositioned = Nothing
       , viewbox = Dimensions 0 0
       , mouse = { pos = Nothing, cursor = "normal" }
+      , debouncer = toDebouncer (throttle 250)
       }
     , Task.perform AdjustViewboxFromInitial getViewport
     )
@@ -83,7 +92,16 @@ type Msg
     | AdjustViewboxFromInitial Viewport
     | AdjustViewboxFromResize Int Int
     | ReturnToWaitingForFirstAction
+    | DebounceMsg (Debouncer.Msg Msg)
     | DoNothing
+
+
+updateDebouncer : Debouncer.UpdateConfig Msg Model
+updateDebouncer =
+    { mapMsg = DebounceMsg
+    , getDebouncer = .debouncer
+    , setDebouncer = \debouncer model -> { model | debouncer = debouncer }
+    }
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -134,6 +152,9 @@ update msg model =
 
         ReturnToWaitingForFirstAction ->
             ( { model | state = WaitingForFirstAction }, Cmd.none )
+
+        DebounceMsg subMsg ->
+            Debouncer.update update updateDebouncer subMsg model
 
         DoNothing ->
             ( model, Cmd.none )
@@ -246,15 +267,22 @@ constantSvgAttributes model =
             [ 0, 0, floor model.viewbox.width, floor model.viewbox.height ]
         )
     , SA.preserveAspectRatio "none"
-    , SE.on "mousemove" (D.map TrackMouseMovementAt mouseDecoder)
+    , SE.on "mousemove" (D.map (debouncedVersionOf TrackMouseMovementAt) mouseDecoder)
     ]
+
+
+debouncedVersionOf : (a -> Msg) -> (a -> Msg)
+debouncedVersionOf wrapInMsg a =
+    --DebounceMsg (provideInput (wrapInMsg a))
+    wrapInMsg a
 
 
 svgAttributesWhileWaitingForNodeToBePlaced : Model -> List (S.Attribute Msg)
 svgAttributesWhileWaitingForNodeToBePlaced model =
     case model.state of
         WaitingForNodeToBePlaced ->
-            [ SE.on "click" (D.map PlaceNodeAt mouseDecoder) ]
+            [ SE.on "click" (D.map PlaceNodeAt mouseDecoder)
+            ]
 
         _ ->
             []
