@@ -42,40 +42,40 @@ main =
 
 
 type State
-    = WaitingForNodeToBePlaced
-    | EditingNodeText Node
+    = EditingNodeText Node
     | WaitingForFirstAction
+    | WaitingForNodeToBePlaced
 
 
 type alias Node =
-    { id : Int
-    , pos : Position
-    , dims : Dimensions
+    { dims : Dimensions
+    , id : Int
     , isSelected : Bool
+    , pos : Position
     , text : String
     }
 
 
 type alias Model =
     { state : State
-    , lastNodeId : Int
-    , nodes : List Node
-    , nodeBeingPositioned : Maybe Node
     , viewbox : Dimensions
     , mouse : { pos : Maybe Position, cursor : String }
     , debouncer : Debouncer Msg
+    , lastNodeId : Int
+    , nodes : List Node
+    , nodeBeingPositioned : Maybe Node
     }
 
 
 init : () -> ( Model, Cmd Msg )
 init _ =
     ( { state = WaitingForFirstAction
-      , lastNodeId = -1
-      , nodes = []
-      , nodeBeingPositioned = Nothing
       , viewbox = Dimensions 0 0
       , mouse = { pos = Nothing, cursor = "normal" }
       , debouncer = toDebouncer (throttle 250)
+      , lastNodeId = -1
+      , nodes = []
+      , nodeBeingPositioned = Nothing
       }
     , Task.perform AdjustViewboxFromInitial getViewport
     )
@@ -86,14 +86,14 @@ init _ =
 
 
 type Msg
-    = TrackMouseMovementAt Position
-    | WaitForNodeToBePlaced
-    | PlaceNodeAt Position
-    | AdjustViewboxFromInitial Viewport
+    = AdjustViewboxFromInitial Viewport
     | AdjustViewboxFromResize Int Int
-    | ReturnToWaitingForFirstAction
     | DebounceMsg (Debouncer.Msg Msg)
     | DoNothing
+    | PlaceNodeAt Position
+    | ReturnToWaitingForFirstAction
+    | TrackMouseMovementAt Position
+    | WaitForNodeToBePlaced
 
 
 updateDebouncer : Debouncer.UpdateConfig Msg Model
@@ -107,17 +107,23 @@ updateDebouncer =
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        TrackMouseMovementAt pos ->
+        AdjustViewboxFromInitial viewport ->
             let
-                mouse =
-                    model.mouse
+                { width, height } =
+                    viewport.viewport
             in
-            ( { model | mouse = { mouse | pos = Just pos } }, Cmd.none )
+            ( { model | viewbox = Dimensions width height }, Cmd.none )
 
-        WaitForNodeToBePlaced ->
-            ( { model | state = WaitingForNodeToBePlaced }
+        AdjustViewboxFromResize width height ->
+            ( { model | viewbox = Dimensions (toFloat width) (toFloat height) }
             , Cmd.none
             )
+
+        DebounceMsg subMsg ->
+            Debouncer.update update updateDebouncer subMsg model
+
+        DoNothing ->
+            ( model, Cmd.none )
 
         PlaceNodeAt pos ->
             let
@@ -138,26 +144,20 @@ update msg model =
             , Cmd.none
             )
 
-        AdjustViewboxFromInitial viewport ->
-            let
-                { width, height } =
-                    viewport.viewport
-            in
-            ( { model | viewbox = Dimensions width height }, Cmd.none )
-
-        AdjustViewboxFromResize width height ->
-            ( { model | viewbox = Dimensions (toFloat width) (toFloat height) }
-            , Cmd.none
-            )
-
         ReturnToWaitingForFirstAction ->
             ( { model | state = WaitingForFirstAction }, Cmd.none )
 
-        DebounceMsg subMsg ->
-            Debouncer.update update updateDebouncer subMsg model
+        TrackMouseMovementAt pos ->
+            let
+                mouse =
+                    model.mouse
+            in
+            ( { model | mouse = { mouse | pos = Just pos } }, Cmd.none )
 
-        DoNothing ->
-            ( model, Cmd.none )
+        WaitForNodeToBePlaced ->
+            ( { model | state = WaitingForNodeToBePlaced }
+            , Cmd.none
+            )
 
 
 placedNodeAt : Position -> Int -> Node
@@ -192,11 +192,11 @@ commonSubscriptions =
 specificSubscriptions : Model -> List (Sub Msg)
 specificSubscriptions model =
     case model.state of
-        WaitingForNodeToBePlaced ->
-            [ onKeyUp (D.map mapKeyDecoderWhenWaitingForNodeToBePlaced keyDecoder) ]
-
         WaitingForFirstAction ->
             [ onKeyUp (D.map mapKeyDecoderForWaitingForFirstAction keyDecoder) ]
+
+        WaitingForNodeToBePlaced ->
+            [ onKeyUp (D.map mapKeyDecoderWhenWaitingForNodeToBePlaced keyDecoder) ]
 
         _ ->
             []
@@ -390,14 +390,14 @@ nodeBackground node attrs =
 modelName : Model -> String
 modelName model =
     case model.state of
-        WaitingForNodeToBePlaced ->
-            "Waiting for node to be placed"
-
         EditingNodeText node ->
             "Editing text for node " ++ String.fromInt node.id
 
         WaitingForFirstAction ->
             "Waiting for first action"
+
+        WaitingForNodeToBePlaced ->
+            "Waiting for node to be placed"
 
 
 
