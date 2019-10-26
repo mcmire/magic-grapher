@@ -1,9 +1,9 @@
-module RoundedRectangle exposing (roundedRectCenteredAt)
+module RoundedRectangle exposing (roundedRect, roundedRectCenteredAt)
 
 import Basics exposing (toFloat)
 import Svg as S
 import Svg.Attributes as SA
-import Types exposing (Dimensions, Positionable)
+import Types exposing (Dimensions, Position)
 
 
 type BoxedNumber
@@ -15,7 +15,12 @@ type BoxedNumber
 -- Source: <https://codepen.io/ajv/pen/wKdrWb>
 
 
-roundedRectCenteredAt : Positionable thing -> Dimensions -> Float -> List (S.Attribute msg) -> S.Svg msg
+roundedRect : Dimensions -> Float -> List (S.Attribute msg) -> S.Svg msg
+roundedRect dims radius attrs =
+    roundedRectCenteredAt { x = 0, y = 0 } dims radius attrs
+
+
+roundedRectCenteredAt : Position -> Dimensions -> Float -> List (S.Attribute msg) -> S.Svg msg
 roundedRectCenteredAt { x, y } { width, height } radius attrs =
     let
         defaultAttrs =

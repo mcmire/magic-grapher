@@ -11,14 +11,14 @@ import Html as H
 import Html.Attributes as HA
 import Json.Decode as D
 import List
-import RoundedRectangle exposing (roundedRectCenteredAt)
+import RoundedRectangle exposing (roundedRect)
 import String exposing (concat)
 import Styles.Main exposing (debug, world)
 import Svg as S
 import Svg.Attributes as SA
 import Svg.Events as SE
 import Task
-import Types exposing (Dimensions, Position, Positionable)
+import Types exposing (Dimensions, Position)
 
 
 main =
@@ -41,7 +41,12 @@ type State
 
 
 type alias Node =
-    Positionable { id : Int, text : String }
+    { id : Int
+    , pos : Position
+    , dims : Dimensions
+    , isSelected : Bool
+    , text : String
+    }
 
 
 type alias Model =
@@ -50,7 +55,7 @@ type alias Model =
     , nodes : List Node
     , nodeBeingPositioned : Maybe Node
     , viewbox : Dimensions
-    , mouse : Maybe Position
+    , mouse : { pos : Maybe Position, cursor : String }
     }
 
 
@@ -61,7 +66,7 @@ init _ =
       , nodes = []
       , nodeBeingPositioned = Nothing
       , viewbox = Dimensions 0 0
-      , mouse = Nothing
+      , mouse = { pos = Nothing, cursor = "normal" }
       }
     , Task.perform AdjustViewboxFromInitial getViewport
     )
@@ -85,7 +90,11 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         TrackMouseMovementAt pos ->
-            ( { model | mouse = Just pos }, Cmd.none )
+            let
+                mouse =
+                    model.mouse
+            in
+            ( { model | mouse = { mouse | pos = Just pos } }, Cmd.none )
 
         WaitForNodeToBePlaced ->
             ( { model | state = WaitingForNodeToBePlaced }
@@ -98,10 +107,13 @@ update msg model =
                     model.lastNodeId + 1
 
                 newNode =
-                    newNodeAt pos nextNodeId
+                    placedNodeAt pos nextNodeId
+
+                selectedNewNode =
+                    { newNode | isSelected = True }
             in
             ( { model
-                | nodes = model.nodes ++ [ newNode ]
+                | nodes = model.nodes ++ [ selectedNewNode ]
                 , lastNodeId = nextNodeId
                 , state = EditingNodeText newNode
               }
@@ -127,9 +139,19 @@ update msg model =
             ( model, Cmd.none )
 
 
-newNodeAt : Position -> Int -> Node
-newNodeAt pos id =
-    { id = id, x = pos.x, y = pos.y, text = "" }
+placedNodeAt : Position -> Int -> Node
+placedNodeAt pos id =
+    { id = id
+    , pos = pos
+    , dims = { width = 210.0, height = 90.0 }
+    , text = ""
+    , isSelected = False
+    }
+
+
+unplacedNodeAt : Position -> Node
+unplacedNodeAt pos =
+    placedNodeAt pos 0
 
 
 
@@ -242,9 +264,15 @@ nodeElementToBePlaced : Model -> List (H.Html Msg)
 nodeElementToBePlaced model =
     case model.state of
         WaitingForNodeToBePlaced ->
-            case model.mouse of
+            case model.mouse.pos of
                 Just pos ->
-                    [ nodeElement pos [ SA.stroke (colorToCssHsla (nodeBorderColor 0.6)) ] ]
+                    [ nodeElement
+                        (unplacedNodeAt pos)
+                        [ SA.stroke (colorToCssHsla unselectedNodeBorderColor)
+                        , SA.fill "white"
+                        , SA.opacity "0.6"
+                        ]
+                    ]
 
                 Nothing ->
                     []
@@ -260,15 +288,75 @@ placedNodeElements model =
 
 placedNodeElement : Node -> S.Svg msg
 placedNodeElement node =
+    let
+        nodeBorderColor =
+            if node.isSelected then
+                selectedNodeBorderColor
+
+            else
+                unselectedNodeBorderColor
+    in
     nodeElement node
-        [ SA.stroke (colorToCssHsla (nodeBorderColor 1))
-        , SA.fill (colorToCssHsla nodeFillColor)
+        [ SA.stroke (colorToCssHsla nodeBorderColor)
+        , SA.fill (colorToCssHsla unselectedNodeFillColor)
         ]
 
 
-nodeElement : Positionable thing -> List (S.Attribute msg) -> S.Svg msg
-nodeElement position attrs =
-    roundedRectCenteredAt position (Dimensions 210 90) 5 attrs
+nodeElement : Node -> List (S.Attribute msg) -> S.Svg msg
+nodeElement node attrs =
+    S.g
+        [ SA.transform
+            ("translate("
+                ++ String.fromFloat node.pos.x
+                ++ " "
+                ++ String.fromFloat node.pos.y
+                ++ ")"
+            )
+        ]
+        (nodeBackground node attrs ++ nodeForeground node attrs)
+
+
+nodeForeground : Node -> List (S.Attribute msg) -> List (S.Svg msg)
+nodeForeground node attrs =
+    let
+        attrsWithPossibleStrokeWidth =
+            if node.isSelected then
+                attrs ++ [ SA.strokeWidth "2px" ]
+
+            else
+                attrs
+    in
+    [ roundedRect node.dims
+        5
+        (attrsWithPossibleStrokeWidth ++ [ SA.cursor "move" ])
+    ]
+
+
+nodeBackground : Node -> List (S.Attribute msg) -> List (S.Svg msg)
+nodeBackground node attrs =
+    if node.isSelected then
+        let
+            width =
+                node.dims.width + 10
+
+            height =
+                node.dims.height + 10
+        in
+        [ S.rect
+            (attrs
+                ++ [ SA.x (String.fromFloat -(width / 2))
+                   , SA.y (String.fromFloat -(height / 2))
+                   , SA.width (String.fromFloat width)
+                   , SA.height (String.fromFloat height)
+                   , SA.fill (colorToCssHsla selectedNodeFillColor)
+                   , SA.stroke "none"
+                   ]
+            )
+            []
+        ]
+
+    else
+        []
 
 
 modelName : Model -> String
@@ -288,12 +376,27 @@ modelName model =
 --- UTILITIES
 
 
-nodeBorderColor alpha =
-    hsla (degrees 228) 0.57 0.68 alpha
+unselectedNodeBorderColor =
+    hsla (degrees 228) 0.57 0.68 1
 
 
-nodeFillColor =
+
+{-
+   unplacedNodeBorderColor =
+     unselectedNodeBorderColor
+-}
+
+
+selectedNodeBorderColor =
+    hsla (degrees 228) 0.85 0.56 1
+
+
+unselectedNodeFillColor =
     hsla (degrees 228) 0.56 0.91 1
+
+
+selectedNodeFillColor =
+    hsla (degrees 228) 0.56 0.91 0.6
 
 
 joinIntsWith : String -> List Int -> String

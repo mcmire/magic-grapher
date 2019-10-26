@@ -1,8 +1,4 @@
-module Types exposing (Dimensions, Position, Positionable)
-
-
-type alias Positionable thing =
-    { thing | x : Float, y : Float }
+module Types exposing (Dimensions, Position)
 
 
 type alias Position =
