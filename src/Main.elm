@@ -4,7 +4,8 @@ import Basics exposing (floor)
 import Browser
 import Browser.Dom exposing (Viewport, getViewport)
 import Browser.Events exposing (onKeyUp, onResize)
-import Color exposing (hsla, toCssString)
+import Color exposing (hsla)
+import Color.Convert exposing (colorToCssHsla)
 import Debug exposing (log, toString)
 import Html as H
 import Html.Attributes as HA
@@ -211,7 +212,7 @@ view model =
 svgAttributes : Model -> List (S.Attribute Msg)
 svgAttributes model =
     constantSvgAttributes model
-        ++ svgAttributesWhileCapturingMouseMovements model
+        ++ svgAttributesWhileWaitingForNodeToBePlaced model
 
 
 constantSvgAttributes : Model -> List (S.Attribute Msg)
@@ -227,8 +228,8 @@ constantSvgAttributes model =
     ]
 
 
-svgAttributesWhileCapturingMouseMovements : Model -> List (S.Attribute Msg)
-svgAttributesWhileCapturingMouseMovements model =
+svgAttributesWhileWaitingForNodeToBePlaced : Model -> List (S.Attribute Msg)
+svgAttributesWhileWaitingForNodeToBePlaced model =
     case model.state of
         WaitingForNodeToBePlaced ->
             [ SE.on "click" (D.map PlaceNodeAt mouseDecoder) ]
@@ -243,22 +244,7 @@ nodeElementToBePlaced model =
         WaitingForNodeToBePlaced ->
             case model.mouse of
                 Just pos ->
-                    [ S.g
-                        [ SA.transform
-                            (concat
-                                [ "translate("
-                                , String.fromFloat pos.x
-                                , " "
-                                , String.fromFloat pos.y
-                                , ")"
-                                ]
-                            )
-                        ]
-                        [ nodeElement
-                            { x = 0, y = 0 }
-                            [ SA.stroke (toCssString (hsla 0.6 0.7 0.75 0.6)) ]
-                        ]
-                    ]
+                    [ nodeElement pos [ SA.stroke (colorToCssHsla (nodeBorderColor 0.6)) ] ]
 
                 Nothing ->
                     []
@@ -274,7 +260,10 @@ placedNodeElements model =
 
 placedNodeElement : Node -> S.Svg msg
 placedNodeElement node =
-    nodeElement node [ SA.stroke (toCssString (hsla 0.6 0.3 0.3 1)) ]
+    nodeElement node
+        [ SA.stroke (colorToCssHsla (nodeBorderColor 1))
+        , SA.fill (colorToCssHsla nodeFillColor)
+        ]
 
 
 nodeElement : Positionable thing -> List (S.Attribute msg) -> S.Svg msg
@@ -297,6 +286,14 @@ modelName model =
 
 
 --- UTILITIES
+
+
+nodeBorderColor alpha =
+    hsla (degrees 228) 0.57 0.68 alpha
+
+
+nodeFillColor =
+    hsla (degrees 228) 0.56 0.91 1
 
 
 joinIntsWith : String -> List Int -> String

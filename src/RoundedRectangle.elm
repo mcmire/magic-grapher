@@ -11,6 +11,10 @@ type BoxedNumber
     | BoxedFloat Float
 
 
+
+-- Source: <https://codepen.io/ajv/pen/wKdrWb>
+
+
 roundedRectCenteredAt : Positionable thing -> Dimensions -> Float -> List (S.Attribute msg) -> S.Svg msg
 roundedRectCenteredAt { x, y } { width, height } radius attrs =
     let
@@ -29,10 +33,11 @@ roundedRectCenteredAt { x, y } { width, height } radius attrs =
                     , roundedCorner radius -radius
                     ]
                 )
+            , SA.stroke "black"
             , SA.fill "none"
             ]
     in
-    S.path (attrs ++ defaultAttrs) []
+    S.path (defaultAttrs ++ attrs) []
 
 
 roundedCorner : Float -> Float -> String
