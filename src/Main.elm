@@ -18,13 +18,15 @@ import Html as H
 import Html.Attributes as HA
 import Json.Decode as D
 import List
+import List.Extra
 import RoundedRectangle exposing (roundedRect)
 import String exposing (concat)
-import Styles.Main exposing (debug, world)
+import Styles.Main as Styles
 import Svg as S
 import Svg.Attributes as SA
 import Svg.Events as SE
 import Task
+import Tuple
 import Types exposing (Dimensions, Position)
 
 
@@ -48,10 +50,9 @@ type State
 
 
 type alias Node =
-    { dims : Dimensions
-    , id : Int
-    , isSelected : Bool
+    { id : Int
     , pos : Position
+    , dims : Dimensions
     , text : String
     }
 
@@ -61,9 +62,10 @@ type alias Model =
     , viewbox : Dimensions
     , mouse : { pos : Maybe Position, cursor : String }
     , debouncer : Debouncer Msg
-    , lastNodeId : Int
     , nodes : List Node
-    , nodeBeingPositioned : Maybe Node
+    , lastNodeId : Int
+    , nodeIdBeingEdited : Maybe Int
+    , selectedNodeId : Maybe Int
     }
 
 
@@ -73,9 +75,10 @@ init _ =
       , viewbox = Dimensions 0 0
       , mouse = { pos = Nothing, cursor = "normal" }
       , debouncer = toDebouncer (throttle 250)
-      , lastNodeId = -1
       , nodes = []
-      , nodeBeingPositioned = Nothing
+      , lastNodeId = -1
+      , nodeIdBeingEdited = Nothing
+      , selectedNodeId = Nothing
       }
     , Task.perform AdjustViewboxFromInitial getViewport
     )
@@ -89,6 +92,7 @@ type Msg
     = AdjustViewboxFromInitial Viewport
     | AdjustViewboxFromResize Int Int
     | DebounceMsg (Debouncer.Msg Msg)
+    | EditNodeText Node
     | DoNothing
     | PlaceNodeAt Position
     | ReturnToWaitingForFirstAction
@@ -125,6 +129,14 @@ update msg model =
         DoNothing ->
             ( model, Cmd.none )
 
+        EditNodeText node ->
+            ( { model
+                | state = EditingNodeText node
+                , nodeIdBeingEdited = Just node.id
+              }
+            , Cmd.none
+            )
+
         PlaceNodeAt pos ->
             let
                 nextNodeId =
@@ -132,17 +144,15 @@ update msg model =
 
                 newNode =
                     placedNodeAt pos nextNodeId
-
-                selectedNewNode =
-                    { newNode | isSelected = True }
             in
-            ( { model
-                | nodes = model.nodes ++ [ selectedNewNode ]
-                , lastNodeId = nextNodeId
-                , state = EditingNodeText newNode
-              }
-            , Cmd.none
-            )
+            -- TODO: Make a "select" msg?
+            update
+                (EditNodeText newNode)
+                { model
+                    | nodes = model.nodes ++ [ newNode ]
+                    , lastNodeId = newNode.id
+                    , selectedNodeId = Just newNode.id
+                }
 
         ReturnToWaitingForFirstAction ->
             ( { model | state = WaitingForFirstAction }, Cmd.none )
@@ -166,13 +176,12 @@ placedNodeAt pos id =
     , pos = pos
     , dims = { width = 210.0, height = 90.0 }
     , text = ""
-    , isSelected = False
     }
 
 
 unplacedNodeAt : Position -> Node
 unplacedNodeAt pos =
-    placedNodeAt pos 0
+    placedNodeAt pos -1
 
 
 
@@ -245,7 +254,9 @@ mouseDecoder =
 view : Model -> H.Html Msg
 view model =
     H.div []
-        [ H.div [ HA.class debug ] [ H.text ("State: " ++ modelName model) ]
+        [ H.div
+            [ HA.class Styles.debug ]
+            [ H.text ("State: " ++ modelName model) ]
         , S.svg
             (svgAttributes model)
             (nodeElementToBePlaced model ++ placedNodeElements model)
@@ -260,7 +271,7 @@ svgAttributes model =
 
 constantSvgAttributes : Model -> List (S.Attribute Msg)
 constantSvgAttributes model =
-    [ SA.class world
+    [ SA.class Styles.world
     , SA.viewBox
         (joinIntsWith
             " "
@@ -295,6 +306,7 @@ nodeElementToBePlaced model =
             case model.mouse.pos of
                 Just pos ->
                     [ nodeElement
+                        model
                         (unplacedNodeAt pos)
                         [ SA.stroke (colorToCssHsla unselectedNodeBorderColor)
                         , SA.fill "white"
@@ -311,27 +323,28 @@ nodeElementToBePlaced model =
 
 placedNodeElements : Model -> List (S.Svg msg)
 placedNodeElements model =
-    List.map placedNodeElement model.nodes
+    List.map (placedNodeElement model) model.nodes
 
 
-placedNodeElement : Node -> S.Svg msg
-placedNodeElement node =
+placedNodeElement : Model -> Node -> S.Svg msg
+placedNodeElement model node =
     let
         nodeBorderColor =
-            if node.isSelected then
+            if maybeEqual model.selectedNodeId node.id then
                 selectedNodeBorderColor
 
             else
                 unselectedNodeBorderColor
     in
-    nodeElement node
+    nodeElement model
+        node
         [ SA.stroke (colorToCssHsla nodeBorderColor)
         , SA.fill (colorToCssHsla unselectedNodeFillColor)
         ]
 
 
-nodeElement : Node -> List (S.Attribute msg) -> S.Svg msg
-nodeElement node attrs =
+nodeElement : Model -> Node -> List (S.Attribute msg) -> S.Svg msg
+nodeElement model node attrs =
     S.g
         [ SA.transform
             ("translate("
@@ -341,28 +354,38 @@ nodeElement node attrs =
                 ++ ")"
             )
         ]
-        (nodeBackground node attrs ++ nodeForeground node attrs)
+        (nodeBackground model node attrs
+            ++ nodeForeground model node attrs
+            ++ nodeEditor model node attrs
+        )
 
 
-nodeForeground : Node -> List (S.Attribute msg) -> List (S.Svg msg)
-nodeForeground node attrs =
+nodeForeground : Model -> Node -> List (S.Attribute msg) -> List (S.Svg msg)
+nodeForeground model node attrs =
     let
         attrsWithPossibleStrokeWidth =
-            if node.isSelected then
+            if maybeEqual model.selectedNodeId node.id then
                 attrs ++ [ SA.strokeWidth "2px" ]
 
             else
                 attrs
+
+        cursor =
+            if maybeEqual model.nodeIdBeingEdited node.id then
+                "text"
+
+            else
+                "move"
     in
     [ roundedRect node.dims
         5
-        (attrsWithPossibleStrokeWidth ++ [ SA.cursor "move" ])
+        (attrsWithPossibleStrokeWidth ++ [ SA.cursor cursor ])
     ]
 
 
-nodeBackground : Node -> List (S.Attribute msg) -> List (S.Svg msg)
-nodeBackground node attrs =
-    if node.isSelected then
+nodeBackground : Model -> Node -> List (S.Attribute msg) -> List (S.Svg msg)
+nodeBackground model node attrs =
+    if maybeEqual model.selectedNodeId node.id then
         let
             width =
                 node.dims.width + 10
@@ -380,6 +403,31 @@ nodeBackground node attrs =
                    , SA.stroke "none"
                    ]
             )
+            []
+        ]
+
+    else
+        []
+
+
+nodeEditor : Model -> Node -> List (S.Attribute msg) -> List (S.Svg msg)
+nodeEditor model node attrs =
+    if maybeEqual model.nodeIdBeingEdited node.id then
+        let
+            height =
+                16.0
+
+            nodePadding =
+                10.0
+        in
+        [ S.rect
+            [ SA.x (String.fromFloat ((-node.dims.width / 2) + nodePadding))
+            , SA.y (String.fromFloat (-height / 2))
+            , SA.width "2"
+            , SA.height (String.fromFloat height)
+            , SA.shapeRendering "crispEdges"
+            , SA.class Styles.blink
+            ]
             []
         ]
 
@@ -430,3 +478,13 @@ selectedNodeFillColor =
 joinIntsWith : String -> List Int -> String
 joinIntsWith separator ints =
     String.join separator (List.map String.fromInt ints)
+
+
+maybeEqual : Maybe Int -> Int -> Bool
+maybeEqual maybeId id2 =
+    case maybeId of
+        Just id1 ->
+            id1 == id2
+
+        Nothing ->
+            False
