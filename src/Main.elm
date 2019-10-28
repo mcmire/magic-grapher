@@ -1,4 +1,4 @@
-module Main exposing (main)
+port module Main exposing (main)
 
 import Basics exposing (floor)
 import Browser
@@ -14,9 +14,11 @@ import Debouncer.Messages as Debouncer
         , toDebouncer
         )
 import Debug exposing (log, toString)
+import Dict exposing (Dict)
 import Html as H
 import Html.Attributes as HA
 import Json.Decode as D
+import Json.Encode as E
 import List
 import List.Extra
 import RoundedRectangle exposing (roundedRect)
@@ -28,6 +30,9 @@ import Svg.Events as SE
 import Task
 import Tuple
 import Types exposing (Dimensions, Position)
+
+
+port onSvgTextElementAdded : (D.Value -> msg) -> Sub msg
 
 
 main =
@@ -44,16 +49,37 @@ main =
 
 
 type State
-    = EditingNodeText Node
+    = EditingNodeText NodeId
     | WaitingForFirstAction
     | WaitingForNodeToBePlaced
 
 
+type alias NodeId =
+    Int
+
+
+type alias BoundingBox =
+    { x : Float
+    , y : Float
+    , width : Float
+    , height : Float
+    }
+
+
+type alias SvgTextElementAddedEvent =
+    { nodeId : NodeId
+    , textBox : BoundingBox
+    }
+
+
 type alias Node =
-    { id : Int
+    { id : NodeId
     , pos : Position
     , dims : Dimensions
     , text : String
+    , isSelected : Bool
+    , isBeingEdited : Bool
+    , textBox : Maybe BoundingBox
     }
 
 
@@ -62,10 +88,9 @@ type alias Model =
     , viewbox : Dimensions
     , mouse : { pos : Maybe Position, cursor : String }
     , debouncer : Debouncer Msg
-    , nodes : List Node
+    , nodes : Dict NodeId Node
     , lastNodeId : Int
-    , nodeIdBeingEdited : Maybe Int
-    , selectedNodeId : Maybe Int
+    , errorMessages : List String
     }
 
 
@@ -75,10 +100,9 @@ init _ =
       , viewbox = Dimensions 0 0
       , mouse = { pos = Nothing, cursor = "normal" }
       , debouncer = toDebouncer (throttle 250)
-      , nodes = []
+      , nodes = Dict.empty
       , lastNodeId = -1
-      , nodeIdBeingEdited = Nothing
-      , selectedNodeId = Nothing
+      , errorMessages = []
       }
     , Task.perform AdjustViewboxFromInitial getViewport
     )
@@ -91,8 +115,11 @@ init _ =
 type Msg
     = AdjustViewboxFromInitial Viewport
     | AdjustViewboxFromResize Int Int
+      --| CaptureNodeTextBoundingBox SvgTextElementAddedEvent
+    | CaptureNodeTextBoundingBox (Result D.Error SvgTextElementAddedEvent)
     | DebounceMsg (Debouncer.Msg Msg)
-    | EditNodeText Node
+    | EditNodeText NodeId
+    | EnterNodeText NodeId String
     | DoNothing
     | PlaceNodeAt Position
     | ReturnToWaitingForFirstAction
@@ -123,35 +150,77 @@ update msg model =
             , Cmd.none
             )
 
+        CaptureNodeTextBoundingBox result ->
+            case result of
+                Ok event ->
+                    ( updateNodesIn
+                        model
+                        event.nodeId
+                        (\node -> { node | textBox = Just event.textBox })
+                    , Cmd.none
+                    )
+
+                Err error ->
+                    ( { model
+                        | errorMessages =
+                            String.split
+                                "\n"
+                                (D.errorToString error)
+                      }
+                    , Cmd.none
+                    )
+
         DebounceMsg subMsg ->
             Debouncer.update update updateDebouncer subMsg model
 
         DoNothing ->
             ( model, Cmd.none )
 
-        EditNodeText node ->
-            ( { model
-                | state = EditingNodeText node
-                , nodeIdBeingEdited = Just node.id
-              }
-            , Cmd.none
-            )
+        EditNodeText nodeId ->
+            let
+                updatedModel =
+                    updateNodesIn
+                        model
+                        nodeId
+                        (\node -> { node | isBeingEdited = True })
+            in
+            ( { updatedModel | state = EditingNodeText nodeId }, Cmd.none )
+
+        EnterNodeText nodeId text ->
+            let
+                updatedNodes =
+                    Dict.update nodeId
+                        (\maybeNode ->
+                            case maybeNode of
+                                Just node ->
+                                    -- TODO: What if it's backspace, or a
+                                    -- control character, etc.
+                                    Just { node | text = node.text ++ text }
+
+                                Nothing ->
+                                    Nothing
+                        )
+                        model.nodes
+            in
+            ( { model | nodes = updatedNodes }, Cmd.none )
 
         PlaceNodeAt pos ->
             let
                 nextNodeId =
                     model.lastNodeId + 1
 
-                newNode =
+                placedNode =
                     placedNodeAt pos nextNodeId
+
+                newNode =
+                    { placedNode | isSelected = True }
             in
             -- TODO: Make a "select" msg?
             update
-                (EditNodeText newNode)
+                (EditNodeText newNode.id)
                 { model
-                    | nodes = model.nodes ++ [ newNode ]
+                    | nodes = Dict.insert newNode.id newNode model.nodes
                     , lastNodeId = newNode.id
-                    , selectedNodeId = Just newNode.id
                 }
 
         ReturnToWaitingForFirstAction ->
@@ -170,12 +239,34 @@ update msg model =
             )
 
 
+updateNodesIn model nodeId fn =
+    let
+        updatedNodes =
+            Dict.update
+                nodeId
+                -- TODO: There's probably a better way to do this
+                (\maybeNode ->
+                    case maybeNode of
+                        Just node ->
+                            Just (fn node)
+
+                        Nothing ->
+                            Nothing
+                )
+                model.nodes
+    in
+    { model | nodes = updatedNodes }
+
+
 placedNodeAt : Position -> Int -> Node
 placedNodeAt pos id =
     { id = id
     , pos = pos
     , dims = { width = 210.0, height = 90.0 }
     , text = ""
+    , isSelected = False
+    , isBeingEdited = False
+    , textBox = Nothing
     }
 
 
@@ -195,56 +286,88 @@ subscriptions model =
 
 commonSubscriptions : List (Sub Msg)
 commonSubscriptions =
-    [ onResize AdjustViewboxFromResize ]
+    [ onResize AdjustViewboxFromResize
+    , onSvgTextElementAdded
+        (decodeSvgTextElementAddedEvent >> CaptureNodeTextBoundingBox)
+    ]
 
 
 specificSubscriptions : Model -> List (Sub Msg)
 specificSubscriptions model =
     case model.state of
+        -- TODO: There's probably a way to match these up
         WaitingForFirstAction ->
-            [ onKeyUp (D.map mapKeyDecoderForWaitingForFirstAction keyDecoder) ]
+            [ onKeyUp (D.map (mapKeyDecoder model) decodeKeyEvent) ]
 
         WaitingForNodeToBePlaced ->
-            [ onKeyUp (D.map mapKeyDecoderWhenWaitingForNodeToBePlaced keyDecoder) ]
+            [ onKeyUp (D.map (mapKeyDecoder model) decodeKeyEvent) ]
 
-        _ ->
-            []
-
-
-mapKeyDecoderForWaitingForFirstAction : String -> Msg
-mapKeyDecoderForWaitingForFirstAction key =
-    let
-        _ =
-            log "(waiting for first action) Key: " key
-    in
-    if key == "n" then
-        WaitForNodeToBePlaced
-
-    else
-        DoNothing
+        EditingNodeText _ ->
+            [ onKeyUp (D.map (mapKeyDecoder model) decodeKeyEvent) ]
 
 
-mapKeyDecoderWhenWaitingForNodeToBePlaced : String -> Msg
-mapKeyDecoderWhenWaitingForNodeToBePlaced key =
-    let
-        _ =
-            log "(capturing mouse move) Key: " key
-    in
-    if key == "Escape" then
-        ReturnToWaitingForFirstAction
+mapKeyDecoder : Model -> String -> Msg
+mapKeyDecoder model key =
+    case model.state of
+        WaitingForFirstAction ->
+            if key == "n" then
+                WaitForNodeToBePlaced
 
-    else
-        DoNothing
+            else
+                DoNothing
+
+        WaitingForNodeToBePlaced ->
+            if key == "Escape" then
+                ReturnToWaitingForFirstAction
+
+            else
+                DoNothing
+
+        EditingNodeText nodeId ->
+            -- TODO: Handle all kinds of keys and such
+            if key == "Escape" then
+                ReturnToWaitingForFirstAction
+
+            else if String.length key == 1 then
+                EnterNodeText nodeId key
+
+            else
+                DoNothing
 
 
-keyDecoder : D.Decoder String
-keyDecoder =
+decodeKeyEvent : D.Decoder String
+decodeKeyEvent =
     D.field "key" D.string
 
 
-mouseDecoder : D.Decoder Position
-mouseDecoder =
+decodeMouseEvent : D.Decoder Position
+decodeMouseEvent =
     D.map2 Position (D.field "clientX" D.float) (D.field "clientY" D.float)
+
+
+decodeSvgTextElementAddedEvent : D.Value -> Result D.Error SvgTextElementAddedEvent
+decodeSvgTextElementAddedEvent =
+    D.decodeValue
+        (D.map2
+            SvgTextElementAddedEvent
+            (D.field "nodeId" decodeNodeId)
+            (D.field "bbox" decodeBbox)
+        )
+
+
+decodeNodeId : D.Decoder NodeId
+decodeNodeId =
+    D.int
+
+
+decodeBbox : D.Decoder BoundingBox
+decodeBbox =
+    D.map4
+        BoundingBox
+        (D.field "x" D.float)
+        (D.field "y" D.float)
+        (D.field "width" D.float)
+        (D.field "height" D.float)
 
 
 
@@ -253,14 +376,42 @@ mouseDecoder =
 
 view : Model -> H.Html Msg
 view model =
-    H.div []
-        [ H.div
-            [ HA.class Styles.debug ]
-            [ H.text ("State: " ++ modelName model) ]
-        , S.svg
-            (svgAttributes model)
-            (nodeElementToBePlaced model ++ placedNodeElements model)
-        ]
+    H.div
+        [ HA.attribute "data-id" "root" ]
+        (withErrorsContainer model (mainChildren model))
+
+
+mainChildren : Model -> List (H.Html Msg)
+mainChildren model =
+    [ H.div
+        [ HA.class Styles.debug ]
+        [ H.text ("State: " ++ describeModelState model) ]
+    , S.svg
+        (svgAttributes model)
+        (nodeElementToBePlaced model ++ placedNodeElements model)
+    ]
+
+
+withErrorsContainer : Model -> List (H.Html Msg) -> List (H.Html Msg)
+withErrorsContainer model elements =
+    if List.isEmpty model.errorMessages then
+        elements
+
+    else
+        elements
+            ++ [ H.div
+                    [ HA.class Styles.errors ]
+                    [ H.div
+                        [ HA.class Styles.errorsHeader ]
+                        [ H.text "Errors" ]
+                    , H.div
+                        [ HA.class Styles.errorsBody ]
+                        (List.map
+                            (\message -> H.p [] [ H.text message ])
+                            model.errorMessages
+                        )
+                    ]
+               ]
 
 
 svgAttributes : Model -> List (S.Attribute Msg)
@@ -278,7 +429,11 @@ constantSvgAttributes model =
             [ 0, 0, floor model.viewbox.width, floor model.viewbox.height ]
         )
     , SA.preserveAspectRatio "none"
-    , SE.on "mousemove" (D.map (debouncedVersionOf TrackMouseMovementAt) mouseDecoder)
+    , SE.on "mousemove"
+        (D.map
+            (debouncedVersionOf TrackMouseMovementAt)
+            decodeMouseEvent
+        )
     ]
 
 
@@ -292,7 +447,7 @@ svgAttributesWhileWaitingForNodeToBePlaced : Model -> List (S.Attribute Msg)
 svgAttributesWhileWaitingForNodeToBePlaced model =
     case model.state of
         WaitingForNodeToBePlaced ->
-            [ SE.on "click" (D.map PlaceNodeAt mouseDecoder)
+            [ SE.on "click" (D.map PlaceNodeAt decodeMouseEvent)
             ]
 
         _ ->
@@ -323,14 +478,14 @@ nodeElementToBePlaced model =
 
 placedNodeElements : Model -> List (S.Svg msg)
 placedNodeElements model =
-    List.map (placedNodeElement model) model.nodes
+    List.map (placedNodeElement model) (Dict.values model.nodes)
 
 
 placedNodeElement : Model -> Node -> S.Svg msg
 placedNodeElement model node =
     let
         nodeBorderColor =
-            if maybeEqual model.selectedNodeId node.id then
+            if node.isSelected then
                 selectedNodeBorderColor
 
             else
@@ -364,14 +519,14 @@ nodeForeground : Model -> Node -> List (S.Attribute msg) -> List (S.Svg msg)
 nodeForeground model node attrs =
     let
         attrsWithPossibleStrokeWidth =
-            if maybeEqual model.selectedNodeId node.id then
+            if node.isSelected then
                 attrs ++ [ SA.strokeWidth "2px" ]
 
             else
                 attrs
 
         cursor =
-            if maybeEqual model.nodeIdBeingEdited node.id then
+            if node.isBeingEdited then
                 "text"
 
             else
@@ -385,7 +540,7 @@ nodeForeground model node attrs =
 
 nodeBackground : Model -> Node -> List (S.Attribute msg) -> List (S.Svg msg)
 nodeBackground model node attrs =
-    if maybeEqual model.selectedNodeId node.id then
+    if node.isSelected then
         let
             width =
                 node.dims.width + 10
@@ -412,34 +567,56 @@ nodeBackground model node attrs =
 
 nodeEditor : Model -> Node -> List (S.Attribute msg) -> List (S.Svg msg)
 nodeEditor model node attrs =
-    if maybeEqual model.nodeIdBeingEdited node.id then
+    if node.isBeingEdited then
         let
-            height =
-                16.0
+            fontSize =
+                16
 
             nodePadding =
                 10.0
+
+            ( textWidth, textHeight ) =
+                case node.textBox of
+                    Just box ->
+                        ( box.width, box.height )
+
+                    Nothing ->
+                        ( 0, 0 )
         in
         [ S.rect
-            [ SA.x (String.fromFloat ((-node.dims.width / 2) + nodePadding))
-            , SA.y (String.fromFloat (-height / 2))
+            [ --SA.x (String.fromFloat ((-node.dims.width / 2) + nodePadding))
+              --, SA.y (String.fromFloat (-height / 2))
+              SA.x (String.fromFloat (textWidth / 2))
+            , SA.y (String.fromFloat (-fontSize / 2))
             , SA.width "2"
-            , SA.height (String.fromFloat height)
+            , SA.height (String.fromFloat fontSize)
             , SA.shapeRendering "crispEdges"
             , SA.class Styles.blink
             ]
             []
+        , S.text_
+            [ SA.x (String.fromFloat 0)
+            , SA.y (String.fromFloat 0)
+            , SA.dominantBaseline "central"
+            , SA.textAnchor "middle"
+            , SA.fontSize (String.fromInt fontSize ++ "px")
+            , SA.class Styles.text
+            , HA.attribute "data-node-id" (String.fromInt node.id)
+            , HA.attribute "data-width" (String.fromFloat textWidth)
+            , HA.attribute "data-height" (String.fromFloat textHeight)
+            ]
+            [ S.text node.text ]
         ]
 
     else
         []
 
 
-modelName : Model -> String
-modelName model =
+describeModelState : Model -> String
+describeModelState model =
     case model.state of
-        EditingNodeText node ->
-            "Editing text for node " ++ String.fromInt node.id
+        EditingNodeText nodeId ->
+            "Editing text for node " ++ String.fromInt nodeId
 
         WaitingForFirstAction ->
             "Waiting for first action"

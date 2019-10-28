@@ -1,3 +1,23 @@
+.errors {
+  position: fixed;
+  top: 0px;
+  left: 0px;
+  text-align: center;
+  background-color: silver;
+  border-left: 1px solid red;
+  border-bottom: 1px solid red;
+}
+
+.errors-header {
+  background-color: red;
+  padding: 5px;
+  color: white;
+}
+
+.errors-body {
+  padding: 15px;
+}
+
 .debug {
   position: fixed;
   top: 0px;
@@ -12,13 +32,17 @@
 .world {
   height: 100vh;
   width: 100vw;
-  border: 1px solid blue;
+  /*border: 1px solid blue;*/
 }
 
 .blink {
   animation-duration: 1s;
   animation-iteration-count: infinite;
   animation-name: blink;
+}
+
+.text {
+  line-height: 1;
 }
 
 @keyframes blink {
