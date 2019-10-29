@@ -58,17 +58,21 @@ type alias NodeId =
     Int
 
 
-type alias BoundingBox =
-    { x : Float
-    , y : Float
-    , width : Float
-    , height : Float
-    }
+
+{-
+   type alias BoundingBox =
+       { x : Float
+       , y : Float
+       , width : Float
+       , height : Float
+       }
+-}
 
 
 type alias SvgTextElementAddedEvent =
     { nodeId : NodeId
-    , textBox : BoundingBox
+    , width : Float
+    , height : Float
     }
 
 
@@ -76,10 +80,17 @@ type alias Node =
     { id : NodeId
     , pos : Position
     , dims : Dimensions
-    , text : String
+    , content : NodeContent
     , isSelected : Bool
+    }
+
+
+type alias NodeContent =
+    { text : String
+    , width : Float
+    , height : Float
+    , fontSize : Float
     , isBeingEdited : Bool
-    , textBox : Maybe BoundingBox
     }
 
 
@@ -115,7 +126,6 @@ init _ =
 type Msg
     = AdjustViewboxFromInitial Viewport
     | AdjustViewboxFromResize Int Int
-      --| CaptureNodeTextBoundingBox SvgTextElementAddedEvent
     | CaptureNodeTextBoundingBox (Result D.Error SvgTextElementAddedEvent)
     | DebounceMsg (Debouncer.Msg Msg)
     | EditNodeText NodeId
@@ -150,13 +160,22 @@ update msg model =
             , Cmd.none
             )
 
+        -- Pulled from many sources
         CaptureNodeTextBoundingBox result ->
             case result of
                 Ok event ->
                     ( updateNodesIn
                         model
                         event.nodeId
-                        (\node -> { node | textBox = Just event.textBox })
+                        (\node ->
+                            updateNodeContentIn node
+                                (\content ->
+                                    { content
+                                        | width = event.width
+                                        , height = event.height
+                                    }
+                                )
+                        )
                     , Cmd.none
                     )
 
@@ -182,7 +201,12 @@ update msg model =
                     updateNodesIn
                         model
                         nodeId
-                        (\node -> { node | isBeingEdited = True })
+                        (\node ->
+                            updateNodeContentIn node
+                                (\content ->
+                                    { content | isBeingEdited = True }
+                                )
+                        )
             in
             ( { updatedModel | state = EditingNodeText nodeId }, Cmd.none )
 
@@ -195,7 +219,13 @@ update msg model =
                                 Just node ->
                                     -- TODO: What if it's backspace, or a
                                     -- control character, etc.
-                                    Just { node | text = node.text ++ text }
+                                    Just
+                                        (updateNodeContentIn
+                                            node
+                                            (\content ->
+                                                { content | text = content.text ++ text }
+                                            )
+                                        )
 
                                 Nothing ->
                                     Nothing
@@ -239,6 +269,7 @@ update msg model =
             )
 
 
+updateNodesIn : Model -> NodeId -> (Node -> Node) -> Model
 updateNodesIn model nodeId fn =
     let
         updatedNodes =
@@ -258,15 +289,24 @@ updateNodesIn model nodeId fn =
     { model | nodes = updatedNodes }
 
 
+updateNodeContentIn : Node -> (NodeContent -> NodeContent) -> Node
+updateNodeContentIn node fn =
+    { node | content = fn node.content }
+
+
 placedNodeAt : Position -> Int -> Node
 placedNodeAt pos id =
     { id = id
     , pos = pos
     , dims = { width = 210.0, height = 90.0 }
-    , text = ""
+    , content =
+        { text = ""
+        , width = 0
+        , height = 0
+        , fontSize = 16.0
+        , isBeingEdited = False
+        }
     , isSelected = False
-    , isBeingEdited = False
-    , textBox = Nothing
     }
 
 
@@ -348,10 +388,11 @@ decodeMouseEvent =
 decodeSvgTextElementAddedEvent : D.Value -> Result D.Error SvgTextElementAddedEvent
 decodeSvgTextElementAddedEvent =
     D.decodeValue
-        (D.map2
+        (D.map3
             SvgTextElementAddedEvent
             (D.field "nodeId" decodeNodeId)
-            (D.field "bbox" decodeBbox)
+            (D.field "width" D.float)
+            (D.field "height" D.float)
         )
 
 
@@ -360,17 +401,17 @@ decodeNodeId =
     D.int
 
 
-decodeBbox : D.Decoder BoundingBox
-decodeBbox =
-    D.map4
-        BoundingBox
-        (D.field "x" D.float)
-        (D.field "y" D.float)
-        (D.field "width" D.float)
-        (D.field "height" D.float)
 
-
-
+{-
+   decodeBbox : D.Decoder BoundingBox
+   decodeBbox =
+       D.map4
+           BoundingBox
+           (D.field "x" D.float)
+           (D.field "y" D.float)
+           (D.field "width" D.float)
+           (D.field "height" D.float)
+-}
 -- VIEW
 
 
@@ -461,7 +502,6 @@ nodeElementToBePlaced model =
             case model.mouse.pos of
                 Just pos ->
                     [ nodeElement
-                        model
                         (unplacedNodeAt pos)
                         [ SA.stroke (colorToCssHsla unselectedNodeBorderColor)
                         , SA.fill "white"
@@ -491,15 +531,15 @@ placedNodeElement model node =
             else
                 unselectedNodeBorderColor
     in
-    nodeElement model
+    nodeElement
         node
         [ SA.stroke (colorToCssHsla nodeBorderColor)
         , SA.fill (colorToCssHsla unselectedNodeFillColor)
         ]
 
 
-nodeElement : Model -> Node -> List (S.Attribute msg) -> S.Svg msg
-nodeElement model node attrs =
+nodeElement : Node -> List (S.Attribute msg) -> S.Svg msg
+nodeElement node attrs =
     S.g
         [ SA.transform
             ("translate("
@@ -509,14 +549,15 @@ nodeElement model node attrs =
                 ++ ")"
             )
         ]
-        (nodeBackground model node attrs
-            ++ nodeForeground model node attrs
-            ++ nodeEditor model node attrs
+        (nodeBackground node attrs
+            ++ [ nodeForeground node attrs ]
+            ++ [ nodeText node ]
+            ++ nodeEditor node attrs
         )
 
 
-nodeForeground : Model -> Node -> List (S.Attribute msg) -> List (S.Svg msg)
-nodeForeground model node attrs =
+nodeForeground : Node -> List (S.Attribute msg) -> S.Svg msg
+nodeForeground node attrs =
     let
         attrsWithPossibleStrokeWidth =
             if node.isSelected then
@@ -526,20 +567,19 @@ nodeForeground model node attrs =
                 attrs
 
         cursor =
-            if node.isBeingEdited then
+            if node.content.isBeingEdited then
                 "text"
 
             else
                 "move"
     in
-    [ roundedRect node.dims
+    roundedRect node.dims
         5
         (attrsWithPossibleStrokeWidth ++ [ SA.cursor cursor ])
-    ]
 
 
-nodeBackground : Model -> Node -> List (S.Attribute msg) -> List (S.Svg msg)
-nodeBackground model node attrs =
+nodeBackground : Node -> List (S.Attribute msg) -> List (S.Svg msg)
+nodeBackground node attrs =
     if node.isSelected then
         let
             width =
@@ -565,51 +605,44 @@ nodeBackground model node attrs =
         []
 
 
-nodeEditor : Model -> Node -> List (S.Attribute msg) -> List (S.Svg msg)
-nodeEditor model node attrs =
-    if node.isBeingEdited then
+nodeEditor : Node -> List (S.Attribute msg) -> List (S.Svg msg)
+nodeEditor node attrs =
+    if node.content.isBeingEdited then
         let
-            fontSize =
-                16
-
             nodePadding =
                 10.0
-
-            ( textWidth, textHeight ) =
-                case node.textBox of
-                    Just box ->
-                        ( box.width, box.height )
-
-                    Nothing ->
-                        ( 0, 0 )
         in
         [ S.rect
-            [ --SA.x (String.fromFloat ((-node.dims.width / 2) + nodePadding))
-              --, SA.y (String.fromFloat (-height / 2))
-              SA.x (String.fromFloat (textWidth / 2))
-            , SA.y (String.fromFloat (-fontSize / 2))
+            [ SA.x (String.fromFloat (node.content.width / 2))
+            , SA.y (String.fromFloat (-node.content.fontSize / 2))
             , SA.width "2"
-            , SA.height (String.fromFloat fontSize)
+            , SA.height (String.fromFloat node.content.fontSize)
             , SA.shapeRendering "crispEdges"
             , SA.class Styles.blink
             ]
             []
-        , S.text_
-            [ SA.x (String.fromFloat 0)
-            , SA.y (String.fromFloat 0)
-            , SA.dominantBaseline "central"
-            , SA.textAnchor "middle"
-            , SA.fontSize (String.fromInt fontSize ++ "px")
-            , SA.class Styles.text
-            , HA.attribute "data-node-id" (String.fromInt node.id)
-            , HA.attribute "data-width" (String.fromFloat textWidth)
-            , HA.attribute "data-height" (String.fromFloat textHeight)
-            ]
-            [ S.text node.text ]
         ]
 
     else
         []
+
+
+nodeText : Node -> S.Svg msg
+nodeText node =
+    S.text_
+        [ SA.x (String.fromFloat 0)
+        , SA.y (String.fromFloat 0)
+        , SA.dominantBaseline "central"
+        , SA.textAnchor "middle"
+        , SA.fontSize (String.fromFloat node.content.fontSize ++ "px")
+        , SA.class Styles.text
+        , HA.attribute "data-node-id" (String.fromInt node.id)
+        , HA.attribute "data-width"
+            (String.fromFloat node.content.width)
+        , HA.attribute "data-height"
+            (String.fromFloat node.content.height)
+        ]
+        [ S.text node.content.text ]
 
 
 describeModelState : Model -> String

@@ -33,9 +33,11 @@ const svgTextElementAddedObserver = new MutationObserver(mutations => {
 
       if (isSvgTextElement(element)) {
         console.log("svg text element changed!");
+        const bbox = element.getBBox();
         const event = {
           nodeId: parseInt(element.dataset.nodeId, 10),
-          bbox: element.getBBox()
+          width: bbox.width,
+          height: bbox.height
         };
         app.ports.onSvgTextElementAdded.send(event);
       }
