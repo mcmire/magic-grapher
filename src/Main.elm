@@ -90,13 +90,18 @@ init _ =
 -- UPDATE
 
 
+type Input
+    = Character String
+    | Backspace
+
+
 type Msg
     = AdjustViewboxFromInitial Viewport
     | AdjustViewboxFromResize Int Int
     | CaptureNodeTextBoundingBox (Result D.Error SvgTextElementAddedEvent)
     | DebounceMsg (Debouncer.Msg Msg)
     | EditNodeText Node.Id
-    | EnterNodeText Node.Id String
+    | InputNodeContent Node.Id Input
     | DoNothing
     | PlaceNodeAt Position
     | ReturnToWaitingForFirstAction
@@ -175,14 +180,19 @@ update msg model =
             in
             ( { updatedModel | state = EditingNodeText nodeId }, Cmd.none )
 
-        EnterNodeText nodeId text ->
+        InputNodeContent nodeId input ->
             let
-                -- TODO: What if it's backspace, or a
-                -- control character, etc.
                 updatedNodes =
                     NodeCollection.updateNodeContentFor
                         nodeId
-                        (\content -> { content | text = content.text ++ text })
+                        (\content ->
+                            case input of
+                                Character char ->
+                                    { content | text = content.text ++ char }
+
+                                Backspace ->
+                                    { content | text = String.dropRight 1 content.text }
+                        )
                         model.nodes
             in
             ( { model | nodes = updatedNodes }, Cmd.none )
@@ -265,7 +275,10 @@ mapKeyDecoder model key =
                 ReturnToWaitingForFirstAction
 
             else if String.length key == 1 then
-                EnterNodeText nodeId key
+                InputNodeContent nodeId (Character key)
+
+            else if key == "Backspace" then
+                InputNodeContent nodeId Backspace
 
             else
                 DoNothing
