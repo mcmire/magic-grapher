@@ -21,6 +21,8 @@ import Json.Decode as D
 import Json.Encode as E
 import List
 import List.Extra
+import Node exposing (Node)
+import NodeCollection exposing (NodeCollection)
 import RoundedRectangle exposing (roundedRect)
 import String exposing (concat)
 import Styles.Main as Styles
@@ -49,48 +51,15 @@ main =
 
 
 type State
-    = EditingNodeText NodeId
+    = EditingNodeText Node.Id
     | WaitingForFirstAction
     | WaitingForNodeToBePlaced
 
 
-type alias NodeId =
-    Int
-
-
-
-{-
-   type alias BoundingBox =
-       { x : Float
-       , y : Float
-       , width : Float
-       , height : Float
-       }
--}
-
-
 type alias SvgTextElementAddedEvent =
-    { nodeId : NodeId
+    { nodeId : Node.Id
     , width : Float
     , height : Float
-    }
-
-
-type alias Node =
-    { id : NodeId
-    , pos : Position
-    , dims : Dimensions
-    , content : NodeContent
-    , isSelected : Bool
-    }
-
-
-type alias NodeContent =
-    { text : String
-    , width : Float
-    , height : Float
-    , fontSize : Float
-    , isBeingEdited : Bool
     }
 
 
@@ -99,8 +68,7 @@ type alias Model =
     , viewbox : Dimensions
     , mouse : { pos : Maybe Position, cursor : String }
     , debouncer : Debouncer Msg
-    , nodes : Dict NodeId Node
-    , lastNodeId : Int
+    , nodes : NodeCollection
     , errorMessages : List String
     }
 
@@ -111,8 +79,7 @@ init _ =
       , viewbox = Dimensions 0 0
       , mouse = { pos = Nothing, cursor = "normal" }
       , debouncer = toDebouncer (throttle 250)
-      , nodes = Dict.empty
-      , lastNodeId = -1
+      , nodes = NodeCollection.empty
       , errorMessages = []
       }
     , Task.perform AdjustViewboxFromInitial getViewport
@@ -128,8 +95,8 @@ type Msg
     | AdjustViewboxFromResize Int Int
     | CaptureNodeTextBoundingBox (Result D.Error SvgTextElementAddedEvent)
     | DebounceMsg (Debouncer.Msg Msg)
-    | EditNodeText NodeId
-    | EnterNodeText NodeId String
+    | EditNodeText Node.Id
+    | EnterNodeText Node.Id String
     | DoNothing
     | PlaceNodeAt Position
     | ReturnToWaitingForFirstAction
@@ -162,32 +129,31 @@ update msg model =
 
         -- Pulled from many sources
         CaptureNodeTextBoundingBox result ->
-            case result of
-                Ok event ->
-                    ( updateNodesIn
-                        model
-                        event.nodeId
-                        (\node ->
-                            updateNodeContentIn node
-                                (\content ->
-                                    { content
-                                        | width = event.width
-                                        , height = event.height
-                                    }
-                                )
-                        )
-                    , Cmd.none
-                    )
+            let
+                newModel =
+                    case result of
+                        Ok event ->
+                            { model
+                                | nodes =
+                                    NodeCollection.updateNodeContentFor event.nodeId
+                                        (\content ->
+                                            { content
+                                                | width = event.width
+                                                , height = event.height
+                                            }
+                                        )
+                                        model.nodes
+                            }
 
-                Err error ->
-                    ( { model
-                        | errorMessages =
-                            String.split
-                                "\n"
-                                (D.errorToString error)
-                      }
-                    , Cmd.none
-                    )
+                        Err error ->
+                            { model
+                                | errorMessages =
+                                    String.split
+                                        "\n"
+                                        (D.errorToString error)
+                            }
+            in
+            ( newModel, Cmd.none )
 
         DebounceMsg subMsg ->
             Debouncer.update update updateDebouncer subMsg model
@@ -198,60 +164,36 @@ update msg model =
         EditNodeText nodeId ->
             let
                 updatedModel =
-                    updateNodesIn
-                        model
-                        nodeId
-                        (\node ->
-                            updateNodeContentIn node
+                    { model
+                        | nodes =
+                            NodeCollection.updateNodeContentFor nodeId
                                 (\content ->
                                     { content | isBeingEdited = True }
                                 )
-                        )
+                                model.nodes
+                    }
             in
             ( { updatedModel | state = EditingNodeText nodeId }, Cmd.none )
 
         EnterNodeText nodeId text ->
             let
+                -- TODO: What if it's backspace, or a
+                -- control character, etc.
                 updatedNodes =
-                    Dict.update nodeId
-                        (\maybeNode ->
-                            case maybeNode of
-                                Just node ->
-                                    -- TODO: What if it's backspace, or a
-                                    -- control character, etc.
-                                    Just
-                                        (updateNodeContentIn
-                                            node
-                                            (\content ->
-                                                { content | text = content.text ++ text }
-                                            )
-                                        )
-
-                                Nothing ->
-                                    Nothing
-                        )
+                    NodeCollection.updateNodeContentFor
+                        nodeId
+                        (\content -> { content | text = content.text ++ text })
                         model.nodes
             in
             ( { model | nodes = updatedNodes }, Cmd.none )
 
         PlaceNodeAt pos ->
             let
-                nextNodeId =
-                    model.lastNodeId + 1
-
-                placedNode =
-                    placedNodeAt pos nextNodeId
-
-                newNode =
-                    { placedNode | isSelected = True }
+                ( newNodes, newNode ) =
+                    NodeCollection.insert pos True model.nodes
             in
             -- TODO: Make a "select" msg?
-            update
-                (EditNodeText newNode.id)
-                { model
-                    | nodes = Dict.insert newNode.id newNode model.nodes
-                    , lastNodeId = newNode.id
-                }
+            update (EditNodeText newNode.id) { model | nodes = newNodes }
 
         ReturnToWaitingForFirstAction ->
             ( { model | state = WaitingForFirstAction }, Cmd.none )
@@ -267,52 +209,6 @@ update msg model =
             ( { model | state = WaitingForNodeToBePlaced }
             , Cmd.none
             )
-
-
-updateNodesIn : Model -> NodeId -> (Node -> Node) -> Model
-updateNodesIn model nodeId fn =
-    let
-        updatedNodes =
-            Dict.update
-                nodeId
-                -- TODO: There's probably a better way to do this
-                (\maybeNode ->
-                    case maybeNode of
-                        Just node ->
-                            Just (fn node)
-
-                        Nothing ->
-                            Nothing
-                )
-                model.nodes
-    in
-    { model | nodes = updatedNodes }
-
-
-updateNodeContentIn : Node -> (NodeContent -> NodeContent) -> Node
-updateNodeContentIn node fn =
-    { node | content = fn node.content }
-
-
-placedNodeAt : Position -> Int -> Node
-placedNodeAt pos id =
-    { id = id
-    , pos = pos
-    , dims = { width = 210.0, height = 90.0 }
-    , content =
-        { text = ""
-        , width = 0
-        , height = 0
-        , fontSize = 16.0
-        , isBeingEdited = False
-        }
-    , isSelected = False
-    }
-
-
-unplacedNodeAt : Position -> Node
-unplacedNodeAt pos =
-    placedNodeAt pos -1
 
 
 
@@ -390,29 +286,10 @@ decodeSvgTextElementAddedEvent =
     D.decodeValue
         (D.map3
             SvgTextElementAddedEvent
-            (D.field "nodeId" decodeNodeId)
+            (D.field "nodeId" Node.decodeId)
             (D.field "width" D.float)
             (D.field "height" D.float)
         )
-
-
-decodeNodeId : D.Decoder NodeId
-decodeNodeId =
-    D.int
-
-
-
-{-
-   decodeBbox : D.Decoder BoundingBox
-   decodeBbox =
-       D.map4
-           BoundingBox
-           (D.field "x" D.float)
-           (D.field "y" D.float)
-           (D.field "width" D.float)
-           (D.field "height" D.float)
--}
--- VIEW
 
 
 view : Model -> H.Html Msg
@@ -502,7 +379,7 @@ nodeElementToBePlaced model =
             case model.mouse.pos of
                 Just pos ->
                     [ nodeElement
-                        (unplacedNodeAt pos)
+                        (Node.unplacedAt pos)
                         [ SA.stroke (colorToCssHsla unselectedNodeBorderColor)
                         , SA.fill "white"
                         , SA.opacity "0.6"
@@ -518,7 +395,7 @@ nodeElementToBePlaced model =
 
 placedNodeElements : Model -> List (S.Svg msg)
 placedNodeElements model =
-    List.map (placedNodeElement model) (Dict.values model.nodes)
+    List.map (placedNodeElement model) (NodeCollection.values model.nodes)
 
 
 placedNodeElement : Model -> Node -> S.Svg msg
@@ -666,13 +543,6 @@ unselectedNodeBorderColor =
     hsla (degrees 228) 0.57 0.68 1
 
 
-
-{-
-   unplacedNodeBorderColor =
-     unselectedNodeBorderColor
--}
-
-
 selectedNodeBorderColor =
     hsla (degrees 228) 0.85 0.56 1
 
@@ -688,13 +558,3 @@ selectedNodeFillColor =
 joinIntsWith : String -> List Int -> String
 joinIntsWith separator ints =
     String.join separator (List.map String.fromInt ints)
-
-
-maybeEqual : Maybe Int -> Int -> Bool
-maybeEqual maybeId id2 =
-    case maybeId of
-        Just id1 ->
-            id1 == id2
-
-        Nothing ->
-            False
