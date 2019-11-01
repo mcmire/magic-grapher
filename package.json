@@ -17,7 +17,8 @@
     "node-elm-compiler": "^5.0.4",
     "parcel": "^1.12.4",
     "parcel-plugin-elm-css-modules": "^1.0.1",
-    "postcss-modules": "^1.4.1"
+    "postcss-modules": "^1.4.1",
+    "prettier": "^1.18.2"
   },
   "dependencies": {
     "normalize.css": "^8.0.1",

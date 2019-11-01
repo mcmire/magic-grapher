@@ -14,9 +14,9 @@ import Debouncer.Messages as Debouncer
         , toDebouncer
         )
 import Debug exposing (log, toString)
-import Dict exposing (Dict)
 import Html as H
 import Html.Attributes as HA
+import Html.Events as HE
 import Json.Decode as D
 import Json.Encode as E
 import List
@@ -31,10 +31,10 @@ import Svg.Attributes as SA
 import Svg.Events as SE
 import Task
 import Tuple
-import Types exposing (Dimensions, Position)
+import Types exposing (Dimensions, Position, Range)
 
 
-port onSvgTextElementAdded : (D.Value -> msg) -> Sub msg
+port calculateNodeContentMetrics : E.Value -> Cmd msg
 
 
 main =
@@ -48,6 +48,15 @@ main =
 
 
 -- MODEL
+
+
+type alias NodeContentMetricsRecalculatedEvent =
+    { nodeId : Node.Id
+    , width : Float
+    , height : Float
+    , cursorPosition : Float
+    , text : String
+    }
 
 
 type State
@@ -90,21 +99,33 @@ init _ =
 -- UPDATE
 
 
-type Input
-    = Character String
-    | Backspace
+type Direction
+    = Left
+    | Right
+
+
+
+--| Up
+--| Down
+
+
+type NodeContentChange
+    = AddCharacter String
+    | RemoveLastCharacter
+    | MoveCursor Direction
 
 
 type Msg
     = AdjustViewboxFromInitial Viewport
     | AdjustViewboxFromResize Int Int
-    | CaptureNodeTextBoundingBox (Result D.Error SvgTextElementAddedEvent)
     | DebounceMsg (Debouncer.Msg Msg)
+    | DisplayDecodeError D.Error
     | EditNodeText Node.Id
-    | InputNodeContent Node.Id Input
     | DoNothing
     | PlaceNodeAt Position
+    | ReceiveRecalculatedNodeContentMetrics NodeContentMetricsRecalculatedEvent
     | ReturnToWaitingForFirstAction
+    | UpdateNodeContent Node.Id NodeContentChange
     | TrackMouseMovementAt Position
     | WaitForNodeToBePlaced
 
@@ -132,36 +153,13 @@ update msg model =
             , Cmd.none
             )
 
-        -- Pulled from many sources
-        CaptureNodeTextBoundingBox result ->
-            let
-                newModel =
-                    case result of
-                        Ok event ->
-                            { model
-                                | nodes =
-                                    NodeCollection.updateNodeContentFor event.nodeId
-                                        (\content ->
-                                            { content
-                                                | width = event.width
-                                                , height = event.height
-                                            }
-                                        )
-                                        model.nodes
-                            }
-
-                        Err error ->
-                            { model
-                                | errorMessages =
-                                    String.split
-                                        "\n"
-                                        (D.errorToString error)
-                            }
-            in
-            ( newModel, Cmd.none )
-
         DebounceMsg subMsg ->
             Debouncer.update update updateDebouncer subMsg model
+
+        DisplayDecodeError err ->
+            ( { model | errorMessages = String.split "\n" (D.errorToString err) }
+            , Cmd.none
+            )
 
         DoNothing ->
             ( model, Cmd.none )
@@ -180,22 +178,72 @@ update msg model =
             in
             ( { updatedModel | state = EditingNodeText nodeId }, Cmd.none )
 
-        InputNodeContent nodeId input ->
+        UpdateNodeContent nodeId change ->
             let
-                updatedNodes =
-                    NodeCollection.updateNodeContentFor
-                        nodeId
-                        (\content ->
-                            case input of
-                                Character char ->
-                                    { content | text = content.text ++ char }
+                _ =
+                    log "[Elm] updating node content" { nodeId = nodeId, change = change }
 
-                                Backspace ->
-                                    { content | text = String.dropRight 1 content.text }
-                        )
-                        model.nodes
+                maybeNode =
+                    NodeCollection.get nodeId model.nodes
             in
-            ( { model | nodes = updatedNodes }, Cmd.none )
+            case maybeNode of
+                Just node ->
+                    let
+                        ( text, cursorIndex ) =
+                            case change of
+                                AddCharacter char ->
+                                    ( node.content.text ++ char
+                                    , node.content.cursorIndex + 1
+                                    )
+
+                                RemoveLastCharacter ->
+                                    ( String.dropRight 1 node.content.text
+                                    , node.content.cursorIndex - 1
+                                    )
+
+                                MoveCursor dir ->
+                                    case dir of
+                                        Left ->
+                                            ( node.content.text
+                                            , node.content.cursorIndex - 1
+                                            )
+
+                                        Right ->
+                                            ( node.content.text
+                                            , node.content.cursorIndex + 1
+                                            )
+
+                        newModel =
+                            { model
+                                | nodes =
+                                    NodeCollection.updateNodeContentFor nodeId
+                                        (\content ->
+                                            { content
+                                                | text = text
+                                                , cursorIndex = cursorIndex
+                                            }
+                                        )
+                                        model.nodes
+                            }
+
+                        cmd =
+                            calculateNodeContentMetrics
+                                (encodeCalculateNodeContentMetricsRequest
+                                    node
+                                    text
+                                    cursorIndex
+                                )
+                    in
+                    ( newModel, cmd )
+
+                Nothing ->
+                    ( { model
+                        | errorMessages =
+                            [ "Could not find node " ++ String.fromInt nodeId
+                            ]
+                      }
+                    , Cmd.none
+                    )
 
         PlaceNodeAt pos ->
             let
@@ -204,6 +252,28 @@ update msg model =
             in
             -- TODO: Make a "select" msg?
             update (EditNodeText newNode.id) { model | nodes = newNodes }
+
+        ReceiveRecalculatedNodeContentMetrics event ->
+            let
+                _ =
+                    log "[Elm] receiving recalculated node content metrics" True
+            in
+            ( { model
+                | nodes =
+                    NodeCollection.updateNodeContentFor event.nodeId
+                        (\content ->
+                            { content
+                                | width = event.width
+                                , height = event.height
+                                , cursorPosition = event.cursorPosition
+
+                                --, text = event.text
+                            }
+                        )
+                        model.nodes
+              }
+            , Cmd.none
+            )
 
         ReturnToWaitingForFirstAction ->
             ( { model | state = WaitingForFirstAction }, Cmd.none )
@@ -221,6 +291,15 @@ update msg model =
             )
 
 
+encodeCalculateNodeContentMetricsRequest : Node -> String -> Int -> E.Value
+encodeCalculateNodeContentMetricsRequest node text cursorIndex =
+    E.object
+        [ ( "nodeId", Node.encodeId node.id )
+        , ( "text", E.string text )
+        , ( "cursorIndex", E.int cursorIndex )
+        ]
+
+
 
 -- SUBSCRIPTIONS
 
@@ -232,10 +311,7 @@ subscriptions model =
 
 commonSubscriptions : List (Sub Msg)
 commonSubscriptions =
-    [ onResize AdjustViewboxFromResize
-    , onSvgTextElementAdded
-        (decodeSvgTextElementAddedEvent >> CaptureNodeTextBoundingBox)
-    ]
+    [ onResize AdjustViewboxFromResize ]
 
 
 specificSubscriptions : Model -> List (Sub Msg)
@@ -275,10 +351,20 @@ mapKeyDecoder model key =
                 ReturnToWaitingForFirstAction
 
             else if String.length key == 1 then
-                InputNodeContent nodeId (Character key)
+                UpdateNodeContent nodeId (AddCharacter key)
 
             else if key == "Backspace" then
-                InputNodeContent nodeId Backspace
+                UpdateNodeContent nodeId RemoveLastCharacter
+
+            else if key == "ArrowLeft" then
+                UpdateNodeContent nodeId (MoveCursor Left)
+
+            else if key == "ArrowRight" then
+                UpdateNodeContent nodeId (MoveCursor Right)
+                --else if key == "ArrowUp" then
+                --UpdateNodeContent node (MoveCursor Up)
+                --else if key == "ArrowDown" then
+                --UpdateNodeContent node (MoveCursor Down)
 
             else
                 DoNothing
@@ -294,15 +380,25 @@ decodeMouseEvent =
     D.map2 Position (D.field "clientX" D.float) (D.field "clientY" D.float)
 
 
-decodeSvgTextElementAddedEvent : D.Value -> Result D.Error SvgTextElementAddedEvent
-decodeSvgTextElementAddedEvent =
-    D.decodeValue
-        (D.map3
-            SvgTextElementAddedEvent
+decodeNodeContentMetricsRecalculatedEvent : D.Decoder NodeContentMetricsRecalculatedEvent
+decodeNodeContentMetricsRecalculatedEvent =
+    D.field "detail"
+        (D.map5
+            NodeContentMetricsRecalculatedEvent
             (D.field "nodeId" Node.decodeId)
             (D.field "width" D.float)
             (D.field "height" D.float)
+            (D.field "cursorPosition" D.float)
+            (D.field "text" D.string)
         )
+
+
+decodeCharacterPosition : D.Decoder Range
+decodeCharacterPosition =
+    D.map2
+        Range
+        (D.field "start" D.int)
+        (D.field "end" D.int)
 
 
 view : Model -> H.Html Msg
@@ -323,7 +419,7 @@ mainChildren model =
     ]
 
 
-withErrorsContainer : Model -> List (H.Html Msg) -> List (H.Html Msg)
+withErrorsContainer : Model -> List (H.Html msg) -> List (H.Html msg)
 withErrorsContainer model elements =
     if List.isEmpty model.errorMessages then
         elements
@@ -406,12 +502,12 @@ nodeElementToBePlaced model =
             []
 
 
-placedNodeElements : Model -> List (S.Svg msg)
+placedNodeElements : Model -> List (S.Svg Msg)
 placedNodeElements model =
     List.map (placedNodeElement model) (NodeCollection.values model.nodes)
 
 
-placedNodeElement : Model -> Node -> S.Svg msg
+placedNodeElement : Model -> Node -> S.Svg Msg
 placedNodeElement model node =
     let
         nodeBorderColor =
@@ -428,7 +524,7 @@ placedNodeElement model node =
         ]
 
 
-nodeElement : Node -> List (S.Attribute msg) -> S.Svg msg
+nodeElement : Node -> List (S.Attribute Msg) -> S.Svg Msg
 nodeElement node attrs =
     S.g
         [ SA.transform
@@ -441,34 +537,11 @@ nodeElement node attrs =
         ]
         (nodeBackground node attrs
             ++ [ nodeForeground node attrs ]
-            ++ [ nodeText node ]
-            ++ nodeEditor node attrs
+            ++ [ nodeEditor node attrs ]
         )
 
 
-nodeForeground : Node -> List (S.Attribute msg) -> S.Svg msg
-nodeForeground node attrs =
-    let
-        attrsWithPossibleStrokeWidth =
-            if node.isSelected then
-                attrs ++ [ SA.strokeWidth "2px" ]
-
-            else
-                attrs
-
-        cursor =
-            if node.content.isBeingEdited then
-                "text"
-
-            else
-                "move"
-    in
-    roundedRect node.dims
-        5
-        (attrsWithPossibleStrokeWidth ++ [ SA.cursor cursor ])
-
-
-nodeBackground : Node -> List (S.Attribute msg) -> List (S.Svg msg)
+nodeBackground : Node -> List (S.Attribute Msg) -> List (S.Svg Msg)
 nodeBackground node attrs =
     if node.isSelected then
         let
@@ -495,15 +568,87 @@ nodeBackground node attrs =
         []
 
 
-nodeEditor : Node -> List (S.Attribute msg) -> List (S.Svg msg)
+nodeForeground : Node -> List (S.Attribute Msg) -> S.Svg Msg
+nodeForeground node attrs =
+    let
+        attrsWithPossibleStrokeWidth =
+            if node.isSelected then
+                attrs ++ [ SA.strokeWidth "2px" ]
+
+            else
+                attrs
+
+        cursor =
+            if node.content.isBeingEdited then
+                "text"
+
+            else
+                "move"
+    in
+    roundedRect node.dims
+        5
+        (attrsWithPossibleStrokeWidth ++ [ SA.cursor cursor ])
+
+
+nodeEditor : Node -> List (S.Attribute Msg) -> S.Svg Msg
 nodeEditor node attrs =
+    S.g
+        [ HA.attribute "data-id" "node-editor"
+        , HA.attribute "data-node-id" (String.fromInt node.id)
+        ]
+        ([ nodeText node [ HA.attribute "data-id" "text-visible" ]
+         , nodeText node
+            [ HA.attribute "data-id" "text-hidden"
+            , HA.style "display" "none"
+            ]
+         ]
+            ++ nodeEditorCursor node attrs
+        )
+
+
+nodeText : Node -> List (S.Attribute Msg) -> S.Svg Msg
+nodeText node attrs =
+    S.text_
+        (attrs
+            ++ [ SA.x (String.fromFloat 0)
+               , SA.y (String.fromFloat 0)
+               , SA.dominantBaseline "central"
+               , SA.textAnchor "middle"
+               , SA.fontSize (String.fromFloat node.content.fontSize ++ "px")
+               , HA.attribute "data-width"
+                    (String.fromFloat node.content.width)
+               , HA.attribute "data-height"
+                    (String.fromFloat node.content.height)
+               , SE.on "metricsRecalculated"
+                    -- This looks particularly heinous, but Elm "conveniently" fails
+                    -- silently if it cannot decode the data within the event which is
+                    -- emitted on the JavaScript side.
+                    -- Source for this solution: <https://github.com/Janiczek/elm-docs/issues/40>
+                    (D.value
+                        |> D.andThen
+                            (\value ->
+                                case D.decodeValue decodeNodeContentMetricsRecalculatedEvent value of
+                                    Ok event ->
+                                        D.succeed (ReceiveRecalculatedNodeContentMetrics event)
+
+                                    Err err ->
+                                        D.succeed (DisplayDecodeError err)
+                            )
+                    )
+               ]
+        )
+        [ S.text node.content.text ]
+
+
+nodeEditorCursor : Node -> List (S.Attribute msg) -> List (S.Svg msg)
+nodeEditorCursor node attrs =
     if node.content.isBeingEdited then
         let
             nodePadding =
                 10.0
         in
         [ S.rect
-            [ SA.x (String.fromFloat (node.content.width / 2))
+            [ SA.x (String.fromFloat node.content.cursorPosition)
             , SA.y (String.fromFloat (-node.content.fontSize / 2))
             , SA.width "2"
             , SA.height (String.fromFloat node.content.fontSize)
@@ -515,24 +660,6 @@ nodeEditor node attrs =
 
     else
         []
-
-
-nodeText : Node -> S.Svg msg
-nodeText node =
-    S.text_
-        [ SA.x (String.fromFloat 0)
-        , SA.y (String.fromFloat 0)
-        , SA.dominantBaseline "central"
-        , SA.textAnchor "middle"
-        , SA.fontSize (String.fromFloat node.content.fontSize ++ "px")
-        , SA.class Styles.text
-        , HA.attribute "data-node-id" (String.fromInt node.id)
-        , HA.attribute "data-width"
-            (String.fromFloat node.content.width)
-        , HA.attribute "data-height"
-            (String.fromFloat node.content.height)
-        ]
-        [ S.text node.content.text ]
 
 
 describeModelState : Model -> String

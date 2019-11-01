@@ -3,13 +3,15 @@ module Node exposing
     , Id
     , Node
     , decodeId
+    , encodeId
     , placedAt
     , unplacedAt
     , updateContent
     )
 
 import Json.Decode as D
-import Types exposing (Dimensions, Position)
+import Json.Encode as E
+import Types exposing (Dimensions, Position, Range)
 
 
 type alias Id =
@@ -18,10 +20,13 @@ type alias Id =
 
 type alias Content =
     { text : String
+    , nextText : String
     , width : Float
     , height : Float
     , fontSize : Float
     , isBeingEdited : Bool
+    , cursorIndex : Int
+    , cursorPosition : Float
     }
 
 
@@ -46,10 +51,21 @@ placedAt pos id =
     , dims = { width = 210.0, height = 90.0 }
     , content =
         { text = ""
+        , nextText = ""
+
+        -- TODO: Nothing?
         , width = 0
+
+        -- TODO: Nothing?
         , height = 0
         , fontSize = 16.0
         , isBeingEdited = False
+
+        -- TODO: Nothing?
+        , cursorIndex = 0
+
+        -- TODO: Nothing?
+        , cursorPosition = 0.0
         }
     , isSelected = False
     }
@@ -63,3 +79,8 @@ unplacedAt pos =
 decodeId : D.Decoder Id
 decodeId =
     D.int
+
+
+encodeId : Int -> E.Value
+encodeId =
+    E.int

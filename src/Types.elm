@@ -1,4 +1,4 @@
-module Types exposing (Dimensions, Position)
+module Types exposing (Dimensions, Position, Range)
 
 
 type alias Position =
@@ -7,3 +7,7 @@ type alias Position =
 
 type alias Dimensions =
     { width : Float, height : Float }
+
+
+type alias Range =
+    { start : Int, end : Int }

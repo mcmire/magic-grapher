@@ -1,6 +1,7 @@
 module NodeCollection exposing
     ( NodeCollection
     , empty
+    , get
     , insert
     , update
     , updateNodeContentFor
@@ -42,6 +43,11 @@ insert pos isSelected coll =
             }
     in
     ( newCollection, newNode )
+
+
+get : Node.Id -> NodeCollection -> Maybe Node
+get nodeId coll =
+    Dict.get nodeId coll.entries
 
 
 update : Node.Id -> (Node -> Node) -> NodeCollection -> NodeCollection

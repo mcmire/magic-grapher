@@ -1,3 +1,9 @@
+/*
+.hidden {
+  display: none;
+}
+*/
+
 .errors {
   position: fixed;
   top: 0px;
@@ -41,8 +47,7 @@
   animation-name: blink;
 }
 
-.text {
-  line-height: 1;
+.node-editor {
 }
 
 @keyframes blink {
