@@ -3,7 +3,7 @@ port module Main exposing (main)
 import Basics exposing (floor)
 import Browser
 import Browser.Dom exposing (Viewport, getViewport)
-import Browser.Events exposing (onKeyUp, onResize)
+import Browser.Events exposing (onKeyDown, onKeyUp, onResize)
 import Color exposing (hsla)
 import Color.Convert exposing (colorToCssHsla)
 import Debouncer.Messages as Debouncer
@@ -343,7 +343,7 @@ specificSubscriptions model =
             [ onKeyUp (D.map (mapKeyDecoder model) decodeKeyEvent) ]
 
         EditingNodeText _ ->
-            [ onKeyUp (D.map (mapKeyDecoder model) decodeKeyEvent) ]
+            [ onKeyDown (D.map (mapKeyDecoder model) decodeKeyEvent) ]
 
 
 mapKeyDecoder : Model -> String -> Msg
