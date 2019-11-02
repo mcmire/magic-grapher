@@ -16,32 +16,20 @@ class NodeEditor {
   calculateMetrics(request) {
     console.log("[JS] calculating metrics!", request);
 
-    //let value = this.visibleTextElement.innerHTML;
-
-    //console.log("value", value);
-
-    //if (value == null) {
-      //value = "";
-    //}
-
-    //if (change.name === "AddCharacter") {
-      //value += change.data.value;
-    //} else if (change.name === "RemoveLastCharacter") {
-      //value = value.slice(0, -2);
-    //} else {
-      //throw new Error(`Unknown change: ${change.name}`);
-    //}
-
-    //console.log("now value", value);
-
-    this.visibleTextElement.innerHTML = request.text;
+    // Update the text node inside of the <text> element
+    // Don't use innerHTML or else it replaces the text node and Elm will get
+    //   very confused!
+    this.visibleTextElement.childNodes[0].nodeValue = request.text;
 
     const bbox = this.visibleTextElement.getBBox();
-    const endPosition = this.visibleTextElement.getEndPositionOfChar(request.cursorIndex - 1);
-    const cursorPosition = request.cursorIndex === 0 ? bbox.x : endPosition.x;
-
-    //console.log("endPosition", endPosition);
-    //console.log("cursorPosition", cursorPosition);
+    // Source: <https://www.w3.org/TR/SVG2/text.html#TextSelectionImplementationNotes>
+    const cursorPosition =
+      request.text === "" ?
+        bbox.x : (
+          request.cursorIndex === -1 ?
+            this.visibleTextElement.getStartPositionOfChar(request.cursorIndex + 1).x :
+            this.visibleTextElement.getEndPositionOfChar(request.cursorIndex).x
+        );
 
     if (isNaN(cursorPosition)) {
       throw new Error("cursorPosition is not a number!");
@@ -51,8 +39,6 @@ class NodeEditor {
       nodeId: parseInt(this.nodeId, 10),
       width: bbox.width,
       height: bbox.height,
-      //characterPositions: this._calculateCharacterPositions(),
-      // Source: <https://www.w3.org/TR/SVG2/text.html#TextSelectionImplementationNotes>
       cursorPosition: cursorPosition,
       text: request.text
     };
@@ -60,19 +46,6 @@ class NodeEditor {
     console.log("[JS] dispatching metricsRecalculated", detail);
     const event = new CustomEvent("metricsRecalculated", { detail });
     this.visibleTextElement.dispatchEvent(event);
-  }
-
-  _calculateCharacterPositions() {
-    const characterPositions = [];
-
-    for (let i = 0, len = this.hiddenTextElement.getNumberOfChars(); i < len; i++) {
-      characterPositions[i] = {
-        start: this.hiddenTextElement.getStartPositionOfChar(i),
-        end: this.hiddenTextElement.getEndPositionOfChar(i)
-      };
-    }
-
-    return characterPositions;
   }
 }
 

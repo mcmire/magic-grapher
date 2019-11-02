@@ -20,7 +20,6 @@ type alias Id =
 
 type alias Content =
     { text : String
-    , nextText : String
     , width : Float
     , height : Float
     , fontSize : Float
@@ -51,7 +50,6 @@ placedAt pos id =
     , dims = { width = 210.0, height = 90.0 }
     , content =
         { text = ""
-        , nextText = ""
 
         -- TODO: Nothing?
         , width = 0
@@ -62,7 +60,7 @@ placedAt pos id =
         , isBeingEdited = False
 
         -- TODO: Nothing?
-        , cursorIndex = 0
+        , cursorIndex = -1
 
         -- TODO: Nothing?
         , cursorPosition = 0.0

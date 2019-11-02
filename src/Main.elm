@@ -24,7 +24,8 @@ import List.Extra
 import Node exposing (Node)
 import NodeCollection exposing (NodeCollection)
 import RoundedRectangle exposing (roundedRect)
-import String exposing (concat)
+import String exposing (concat, slice)
+import String.Extra exposing (insertAt)
 import Styles.Main as Styles
 import Svg as S
 import Svg.Attributes as SA
@@ -110,8 +111,8 @@ type Direction
 
 
 type NodeContentChange
-    = AddCharacter String
-    | RemoveLastCharacter
+    = InsertCharacter String
+    | RemovePreviousCharacter
     | MoveCursor Direction
 
 
@@ -189,29 +190,48 @@ update msg model =
             case maybeNode of
                 Just node ->
                     let
-                        ( text, cursorIndex ) =
+                        cursorIndex =
                             case change of
-                                AddCharacter char ->
-                                    ( node.content.text ++ char
-                                    , node.content.cursorIndex + 1
-                                    )
+                                InsertCharacter char ->
+                                    node.content.cursorIndex + 1
 
-                                RemoveLastCharacter ->
-                                    ( String.dropRight 1 node.content.text
-                                    , node.content.cursorIndex - 1
-                                    )
+                                RemovePreviousCharacter ->
+                                    if node.content.cursorIndex > -1 then
+                                        node.content.cursorIndex - 1
+
+                                    else
+                                        node.content.cursorIndex
 
                                 MoveCursor dir ->
                                     case dir of
                                         Left ->
-                                            ( node.content.text
-                                            , node.content.cursorIndex - 1
-                                            )
+                                            if node.content.cursorIndex > -1 then
+                                                node.content.cursorIndex - 1
+
+                                            else
+                                                node.content.cursorIndex
 
                                         Right ->
-                                            ( node.content.text
-                                            , node.content.cursorIndex + 1
-                                            )
+                                            if node.content.cursorIndex < (String.length node.content.text - 1) then
+                                                node.content.cursorIndex + 1
+
+                                            else
+                                                node.content.cursorIndex
+
+                        text =
+                            case change of
+                                InsertCharacter char ->
+                                    insertAt char cursorIndex node.content.text
+
+                                RemovePreviousCharacter ->
+                                    slice 0 node.content.cursorIndex node.content.text
+                                        ++ slice
+                                            (node.content.cursorIndex + 1)
+                                            (String.length node.content.text)
+                                            node.content.text
+
+                                _ ->
+                                    node.content.text
 
                         newModel =
                             { model
@@ -219,8 +239,8 @@ update msg model =
                                     NodeCollection.updateNodeContentFor nodeId
                                         (\content ->
                                             { content
-                                                | text = text
-                                                , cursorIndex = cursorIndex
+                                                | cursorIndex = cursorIndex
+                                                , text = text
                                             }
                                         )
                                         model.nodes
@@ -230,8 +250,8 @@ update msg model =
                             calculateNodeContentMetrics
                                 (encodeCalculateNodeContentMetricsRequest
                                     node
-                                    text
                                     cursorIndex
+                                    text
                                 )
                     in
                     ( newModel, cmd )
@@ -256,7 +276,7 @@ update msg model =
         ReceiveRecalculatedNodeContentMetrics event ->
             let
                 _ =
-                    log "[Elm] receiving recalculated node content metrics" True
+                    log "[Elm] receiving recalculated node content metrics" event
             in
             ( { model
                 | nodes =
@@ -266,8 +286,6 @@ update msg model =
                                 | width = event.width
                                 , height = event.height
                                 , cursorPosition = event.cursorPosition
-
-                                --, text = event.text
                             }
                         )
                         model.nodes
@@ -291,12 +309,12 @@ update msg model =
             )
 
 
-encodeCalculateNodeContentMetricsRequest : Node -> String -> Int -> E.Value
-encodeCalculateNodeContentMetricsRequest node text cursorIndex =
+encodeCalculateNodeContentMetricsRequest : Node -> Int -> String -> E.Value
+encodeCalculateNodeContentMetricsRequest node cursorIndex text =
     E.object
         [ ( "nodeId", Node.encodeId node.id )
-        , ( "text", E.string text )
         , ( "cursorIndex", E.int cursorIndex )
+        , ( "text", E.string text )
         ]
 
 
@@ -351,10 +369,10 @@ mapKeyDecoder model key =
                 ReturnToWaitingForFirstAction
 
             else if String.length key == 1 then
-                UpdateNodeContent nodeId (AddCharacter key)
+                UpdateNodeContent nodeId (InsertCharacter key)
 
             else if key == "Backspace" then
-                UpdateNodeContent nodeId RemoveLastCharacter
+                UpdateNodeContent nodeId RemovePreviousCharacter
 
             else if key == "ArrowLeft" then
                 UpdateNodeContent nodeId (MoveCursor Left)
