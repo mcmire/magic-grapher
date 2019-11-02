@@ -11,6 +11,7 @@ module NodeCollection exposing
 import Dict exposing (Dict)
 import Node exposing (Node)
 import Types exposing (Position)
+import NodeContent exposing (NodeContent)
 
 
 type alias NodeCollection =
@@ -72,7 +73,7 @@ update nodeId fn coll =
 
 updateNodeContentFor :
     Node.Id
-    -> (Node.Content -> Node.Content)
+    -> (NodeContent -> NodeContent)
     -> NodeCollection
     -> NodeCollection
 updateNodeContentFor nodeId fn coll =

@@ -19,10 +19,13 @@ import Html.Attributes as HA
 import Html.Events as HE
 import Json.Decode as D
 import Json.Encode as E
+import Keyboard.Event exposing (KeyboardEvent, decodeKeyboardEvent)
+import Keyboard.Key as Key
 import List
 import List.Extra
 import Node exposing (Node)
 import NodeCollection exposing (NodeCollection)
+import NodeContent exposing (NodeContent)
 import RoundedRectangle exposing (roundedRect)
 import String exposing (concat, slice)
 import String.Extra exposing (insertAt)
@@ -100,20 +103,13 @@ init _ =
 -- UPDATE
 
 
-type Direction
-    = Left
-    | Right
-
-
-
---| Up
---| Down
-
-
 type NodeContentChange
     = InsertCharacter String
     | RemovePreviousCharacter
-    | MoveCursor Direction
+    | MoveCursorLeftByChar
+    | MoveCursorLeftByWord
+    | MoveCursorRightByChar
+    | MoveCursorRightByWord
 
 
 type Msg
@@ -190,38 +186,10 @@ update msg model =
             case maybeNode of
                 Just node ->
                     let
-                        cursorIndex =
-                            case change of
-                                InsertCharacter char ->
-                                    node.content.cursorIndex + 1
-
-                                RemovePreviousCharacter ->
-                                    if node.content.cursorIndex > -1 then
-                                        node.content.cursorIndex - 1
-
-                                    else
-                                        node.content.cursorIndex
-
-                                MoveCursor dir ->
-                                    case dir of
-                                        Left ->
-                                            if node.content.cursorIndex > -1 then
-                                                node.content.cursorIndex - 1
-
-                                            else
-                                                node.content.cursorIndex
-
-                                        Right ->
-                                            if node.content.cursorIndex < (String.length node.content.text - 1) then
-                                                node.content.cursorIndex + 1
-
-                                            else
-                                                node.content.cursorIndex
-
                         text =
                             case change of
                                 InsertCharacter char ->
-                                    insertAt char cursorIndex node.content.text
+                                    insertAt char (node.content.cursorIndex + 1) node.content.text
 
                                 RemovePreviousCharacter ->
                                     slice 0 node.content.cursorIndex node.content.text
@@ -233,14 +201,37 @@ update msg model =
                                 _ ->
                                     node.content.text
 
+                        cursorIndexFn =
+                            case change of
+                                InsertCharacter char ->
+                                    NodeContent.moveCursorRightByChar
+
+                                RemovePreviousCharacter ->
+                                    NodeContent.moveCursorLeftByChar
+
+                                MoveCursorLeftByChar ->
+                                    NodeContent.moveCursorLeftByChar
+
+                                MoveCursorLeftByWord ->
+                                    NodeContent.moveCursorLeftByWord
+
+                                MoveCursorRightByChar ->
+                                    NodeContent.moveCursorRightByChar
+
+                                MoveCursorRightByWord ->
+                                    NodeContent.moveCursorRightByWord
+
+                        cursorIndex =
+                            cursorIndexFn node.content.cursorIndex text
+
                         newModel =
                             { model
                                 | nodes =
                                     NodeCollection.updateNodeContentFor nodeId
                                         (\content ->
                                             { content
-                                                | cursorIndex = cursorIndex
-                                                , text = text
+                                                | text = text
+                                                , cursorIndex = cursorIndex
                                             }
                                         )
                                         model.nodes
@@ -334,63 +325,87 @@ commonSubscriptions =
 
 specificSubscriptions : Model -> List (Sub Msg)
 specificSubscriptions model =
+    let
+        decoder =
+            D.map (mapKeyboardEventToMsg model) decodeKeyboardEvent
+
+        upSubs =
+            [ onKeyUp decoder ]
+
+        downSubs =
+            [ onKeyDown decoder ]
+    in
     case model.state of
-        -- TODO: There's probably a way to match these up
         WaitingForFirstAction ->
-            [ onKeyUp (D.map (mapKeyDecoder model) decodeKeyEvent) ]
+            upSubs
 
         WaitingForNodeToBePlaced ->
-            [ onKeyUp (D.map (mapKeyDecoder model) decodeKeyEvent) ]
+            upSubs
 
         EditingNodeText _ ->
-            [ onKeyDown (D.map (mapKeyDecoder model) decodeKeyEvent) ]
+            downSubs
 
 
-mapKeyDecoder : Model -> String -> Msg
-mapKeyDecoder model key =
+mapKeyboardEventToMsg : Model -> KeyboardEvent -> Msg
+mapKeyboardEventToMsg model keyboardEvent =
     case model.state of
         WaitingForFirstAction ->
-            if key == "n" then
+            if keyboardEvent.keyCode == Key.N then
                 WaitForNodeToBePlaced
 
             else
                 DoNothing
 
         WaitingForNodeToBePlaced ->
-            if key == "Escape" then
+            if keyboardEvent.keyCode == Key.Escape then
                 ReturnToWaitingForFirstAction
 
             else
                 DoNothing
 
         EditingNodeText nodeId ->
-            -- TODO: Handle all kinds of keys and such
-            if key == "Escape" then
-                ReturnToWaitingForFirstAction
+            case keyboardEvent.keyCode of
+                Key.Escape ->
+                    ReturnToWaitingForFirstAction
 
-            else if String.length key == 1 then
-                UpdateNodeContent nodeId (InsertCharacter key)
+                Key.Backspace ->
+                    UpdateNodeContent nodeId RemovePreviousCharacter
 
-            else if key == "Backspace" then
-                UpdateNodeContent nodeId RemovePreviousCharacter
+                Key.Left ->
+                    if keyboardEvent.altKey then
+                        UpdateNodeContent nodeId MoveCursorLeftByWord
 
-            else if key == "ArrowLeft" then
-                UpdateNodeContent nodeId (MoveCursor Left)
+                    else
+                        UpdateNodeContent nodeId MoveCursorLeftByChar
 
-            else if key == "ArrowRight" then
-                UpdateNodeContent nodeId (MoveCursor Right)
-                --else if key == "ArrowUp" then
-                --UpdateNodeContent node (MoveCursor Up)
-                --else if key == "ArrowDown" then
-                --UpdateNodeContent node (MoveCursor Down)
+                Key.Right ->
+                    if keyboardEvent.altKey then
+                        UpdateNodeContent nodeId MoveCursorRightByWord
 
-            else
-                DoNothing
+                    else
+                        UpdateNodeContent nodeId MoveCursorRightByChar
+
+                _ ->
+                    case keyboardEvent.key of
+                        Just key ->
+                            if String.length key == 1 then
+                                UpdateNodeContent nodeId (InsertCharacter key)
+
+                            else
+                                DoNothing
+
+                        Nothing ->
+                            DoNothing
 
 
-decodeKeyEvent : D.Decoder String
-decodeKeyEvent =
-    D.field "key" D.string
+mapMsg : Maybe Msg -> Msg
+mapMsg maybeMsg =
+    case maybeMsg of
+        Just msg ->
+            msg
+
+        Nothing ->
+            DoNothing
 
 
 decodeMouseEvent : D.Decoder Position
@@ -655,13 +670,14 @@ nodeText node attrs =
                     )
                ]
         )
-        [ S.text node.content.text ]
+        [ S.text (NodeContent.normalizeTextForSvgElement node.content.text) ]
 
 
 nodeEditorCursor : Node -> List (S.Attribute msg) -> List (S.Svg msg)
 nodeEditorCursor node attrs =
     if node.content.isBeingEdited then
         let
+            -- TODO: Use
             nodePadding =
                 10.0
         in

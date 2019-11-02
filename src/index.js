@@ -14,26 +14,26 @@ class NodeEditor {
   }
 
   calculateMetrics(request) {
+    const { text } = request;
     console.log("[JS] calculating metrics!", request);
 
     // Update the text node inside of the <text> element
     // Don't use innerHTML or else it replaces the text node and Elm will get
     //   very confused!
-    this.visibleTextElement.childNodes[0].nodeValue = request.text;
-
+    this.visibleTextElement.childNodes[0].nodeValue =
+      this._normalizeTextForSvgElement(text);
+    //console.log("numberOfChars", this.visibleTextElement.getNumberOfChars());
     const bbox = this.visibleTextElement.getBBox();
-    // Source: <https://www.w3.org/TR/SVG2/text.html#TextSelectionImplementationNotes>
-    const cursorPosition =
-      request.text === "" ?
-        bbox.x : (
-          request.cursorIndex === -1 ?
-            this.visibleTextElement.getStartPositionOfChar(request.cursorIndex + 1).x :
-            this.visibleTextElement.getEndPositionOfChar(request.cursorIndex).x
-        );
 
-    if (isNaN(cursorPosition)) {
-      throw new Error("cursorPosition is not a number!");
-    }
+    const cursorIndex = this._normalizeCursorIndex({
+      cursorIndex: request.cursorIndex,
+      text
+    });
+    const cursorPosition = this._determineCursorPosition({
+      cursorIndex,
+      text,
+      bbox
+    })
 
     const detail = {
       nodeId: parseInt(this.nodeId, 10),
@@ -46,6 +46,57 @@ class NodeEditor {
     console.log("[JS] dispatching metricsRecalculated", detail);
     const event = new CustomEvent("metricsRecalculated", { detail });
     this.visibleTextElement.dispatchEvent(event);
+  }
+
+  _normalizeTextForSvgElement(text) {
+    if (text[text.length - 1] === " ") {
+      // HTML/SVG will strip trailing spaces, which affects how we figure out
+      // the positions of each character in the node
+      return text.slice(0, -1) + " ";
+    } else {
+      return text;
+    }
+  }
+
+  _normalizeCursorIndex({ cursorIndex, text }) {
+    if (cursorIndex < 0) {
+      return 0;
+    } else if (cursorIndex > text.length) {
+      return text.length;
+    } else {
+      return cursorIndex;
+    }
+  }
+
+  _determineCursorPosition({ cursorIndex, text, bbox }) {
+    // cursorIndex can either refer to the start of a character or the end of a
+    // character. Usually it refers to the position before a character (so -1 is
+    // a valid index) but if it's the last index in the string then it refers to
+    // the position after the character.
+    //
+    // See this for more on getStartPositionOfChar and getEndPositionOfChar:
+    //
+    //   https://www.w3.org/TR/SVG2/text.html#TextSelectionImplementationNotes
+
+    console.log("cursorIndex", cursorIndex, "text.length", text.length);
+
+    let cursorPosition;
+
+    if (text === "") {
+      cursorPosition = bbox.x;
+    } else if (cursorIndex === text.length) {
+      cursorPosition =
+        this.visibleTextElement.getEndPositionOfChar(cursorIndex - 1).x;
+    } else {
+      cursorPosition =
+        this.visibleTextElement.getStartPositionOfChar(cursorIndex).x;
+    }
+
+    if (isNaN(cursorPosition)) {
+      throw new Error("cursorPosition is not a number!");
+    }
+
+    return cursorPosition;
   }
 }
 

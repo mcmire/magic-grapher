@@ -1,6 +1,5 @@
 module Node exposing
-    ( Content
-    , Id
+    ( Id
     , Node
     , decodeId
     , encodeId
@@ -11,6 +10,7 @@ module Node exposing
 
 import Json.Decode as D
 import Json.Encode as E
+import NodeContent exposing (NodeContent)
 import Types exposing (Dimensions, Position, Range)
 
 
@@ -18,27 +18,16 @@ type alias Id =
     Int
 
 
-type alias Content =
-    { text : String
-    , width : Float
-    , height : Float
-    , fontSize : Float
-    , isBeingEdited : Bool
-    , cursorIndex : Int
-    , cursorPosition : Float
-    }
-
-
 type alias Node =
     { id : Id
     , pos : Position
     , dims : Dimensions
-    , content : Content
+    , content : NodeContent
     , isSelected : Bool
     }
 
 
-updateContent : (Content -> Content) -> Node -> Node
+updateContent : (NodeContent -> NodeContent) -> Node -> Node
 updateContent fn node =
     { node | content = fn node.content }
 
@@ -48,23 +37,7 @@ placedAt pos id =
     { id = id
     , pos = pos
     , dims = { width = 210.0, height = 90.0 }
-    , content =
-        { text = ""
-
-        -- TODO: Nothing?
-        , width = 0
-
-        -- TODO: Nothing?
-        , height = 0
-        , fontSize = 16.0
-        , isBeingEdited = False
-
-        -- TODO: Nothing?
-        , cursorIndex = -1
-
-        -- TODO: Nothing?
-        , cursorPosition = 0.0
-        }
+    , content = NodeContent.init
     , isSelected = False
     }
 
