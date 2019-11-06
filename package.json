@@ -13,7 +13,9 @@
   "author": "Elliot Winkler <elliot.winkler@gmail.com>",
   "license": "MIT",
   "devDependencies": {
+    "elm-format": "^0.8.2",
     "elm-hot": "^1.1.2",
+    "elm-json": "^0.2.2",
     "node-elm-compiler": "^5.0.4",
     "parcel": "^1.12.4",
     "parcel-plugin-elm-css-modules": "^1.0.1",
