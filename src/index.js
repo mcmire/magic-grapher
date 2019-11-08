@@ -113,6 +113,34 @@ function isNodeEditorElement(node) {
   );
 }
 
+function isInterestingKeyEvent(event) {
+  return (
+    event.key === "Escape" ||
+    event.key === "Backspace" ||
+    (event.key === "ArrowLeft" &&
+      (onlyAltKeyPressed(event) ||
+        onlyMetaKeyPressed(event) ||
+        noModifierKeysPressed(event))) ||
+    (event.key === "ArrowRight" &&
+      (onlyAltKeyPressed(event) ||
+        onlyMetaKeyPressed(event) ||
+        noModifierKeysPressed(event))) ||
+    event.key.length === 1
+  );
+}
+
+function onlyAltKeyPressed(event) {
+  return event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+}
+
+function onlyMetaKeyPressed(event) {
+  return !event.altKey && !event.ctrlKey && event.metaKey && !event.shiftKey;
+}
+
+function noModifierKeysPressed(event) {
+  return !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+}
+
 const app = Elm.Main.init({
   node: document.querySelector("main")
 });
@@ -190,9 +218,14 @@ app.ports.startListeningForNodeEditorKeyEvent.subscribe(nodeId => {
   }
 
   keydownEventListener = event => {
-    // XXX: this prevents default on ALL keyboard events --
-    // is that what we want??
-    event.preventDefault();
+    if (event.metaKey && event.key === "r") {
+      window.reload();
+    }
+
+    if (isInterestingKeyEvent(event)) {
+      event.preventDefault();
+    }
+
     nodeEditor.fireKeyEvent(event);
   };
   document.addEventListener("keydown", keydownEventListener);

@@ -494,10 +494,6 @@ cursorView model attrs =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    --if model.isBeingEdited then
-    ----D.map (mapKeyboardEventToMsg model) receiveNodeEditorKeyEvent
-    --receiveNodeEditorKeyEvent ReceiveKeyEvent
-    --else
     Sub.none
 
 
@@ -514,27 +510,34 @@ mapKeyboardEventToMsg model keyboardEvent =
                 StopEditing
 
             Key.Backspace ->
+                -- TODO: Implement removing previous word, line
                 UpdateEditor RemovePreviousCharacter
 
             Key.Left ->
-                if onlyAltKey keyboardEvent then
+                if onlyAltKeyPressed keyboardEvent then
                     UpdateEditor MoveCursorLeftByWord
 
-                else if onlyMetaKey keyboardEvent then
+                else if onlyMetaKeyPressed keyboardEvent then
                     UpdateEditor MoveCursorToBeginningOfLine
 
-                else
+                else if noModifierKeysPressed keyboardEvent then
                     UpdateEditor MoveCursorLeftByChar
 
+                else
+                    DoNothing
+
             Key.Right ->
-                if onlyAltKey keyboardEvent then
+                if onlyAltKeyPressed keyboardEvent then
                     UpdateEditor MoveCursorRightByWord
 
-                else if onlyMetaKey keyboardEvent then
+                else if onlyMetaKeyPressed keyboardEvent then
                     UpdateEditor MoveCursorToEndOfLine
 
-                else
+                else if noModifierKeysPressed keyboardEvent then
                     UpdateEditor MoveCursorRightByChar
+
+                else
+                    DoNothing
 
             _ ->
                 let
@@ -556,17 +559,25 @@ mapKeyboardEventToMsg model keyboardEvent =
         DoNothing
 
 
-onlyAltKey : KeyboardEvent -> Bool
-onlyAltKey keyboardEvent =
+onlyAltKeyPressed : KeyboardEvent -> Bool
+onlyAltKeyPressed keyboardEvent =
     keyboardEvent.altKey
         && not keyboardEvent.ctrlKey
         && not keyboardEvent.metaKey
         && not keyboardEvent.shiftKey
 
 
-onlyMetaKey : KeyboardEvent -> Bool
-onlyMetaKey keyboardEvent =
+onlyMetaKeyPressed : KeyboardEvent -> Bool
+onlyMetaKeyPressed keyboardEvent =
     not keyboardEvent.altKey
         && not keyboardEvent.ctrlKey
         && keyboardEvent.metaKey
+        && not keyboardEvent.shiftKey
+
+
+noModifierKeysPressed : KeyboardEvent -> Bool
+noModifierKeysPressed keyboardEvent =
+    not keyboardEvent.altKey
+        && not keyboardEvent.ctrlKey
+        && not keyboardEvent.metaKey
         && not keyboardEvent.shiftKey
