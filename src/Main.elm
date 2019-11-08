@@ -1,19 +1,11 @@
 module Main exposing (main)
 
-import Basics exposing (floor)
 import Browser
-import Browser.Dom exposing (Viewport, getViewport)
-import Browser.Events exposing (onKeyDown, onKeyUp, onResize)
+import Browser.Dom as Dom exposing (Viewport)
+import Browser.Events as BE
 import Color exposing (hsla)
 import Color.Convert exposing (colorToCssHsla)
-import Debouncer.Messages as Debouncer
-    exposing
-        ( Debouncer
-        , provideInput
-        , throttle
-        , toDebouncer
-        )
-import Debug exposing (log, toString)
+import Debouncer.Messages as Debouncer exposing (Debouncer)
 import Html as H
 import Html.Attributes as HA
 import Html.Events as HE
@@ -80,11 +72,11 @@ init _ =
     ( { state = WaitingForFirstAction
       , viewbox = Dimensions 0 0
       , mouse = { pos = Nothing, cursor = "normal" }
-      , debouncer = toDebouncer (throttle 250)
+      , debouncer = Debouncer.toDebouncer (Debouncer.throttle 250)
       , nodes = NodeCollection.empty
       , errorMessages = []
       }
-    , Task.perform AdjustViewboxFromInitial getViewport
+    , Task.perform AdjustViewboxFromInitial Dom.getViewport
     )
 
 
@@ -181,7 +173,7 @@ update msg model =
                 _ ->
                     let
                         _ =
-                            log "[Elm] updating node content"
+                            Debug.log "[Elm] updating node content"
                                 { nodeId = nodeId
                                 , subMsg = subMsg
                                 }
@@ -231,7 +223,7 @@ subscriptions model =
 
 commonSubscriptions : List (Sub Msg)
 commonSubscriptions =
-    [ onResize AdjustViewboxFromResize ]
+    [ BE.onResize AdjustViewboxFromResize ]
 
 
 specificSubscriptions : Model -> List (Sub Msg)
@@ -241,7 +233,7 @@ specificSubscriptions model =
             D.map (mapKeyboardEventToMsg model) decodeKeyboardEvent
 
         upSubs =
-            [ onKeyUp decoder ]
+            [ BE.onKeyUp decoder ]
     in
     case model.state of
         WaitingForFirstAction ->
@@ -300,14 +292,6 @@ mapMsg maybeMsg =
 decodeMouseEvent : D.Decoder Position
 decodeMouseEvent =
     D.map2 Position (D.field "clientX" D.float) (D.field "clientY" D.float)
-
-
-decodeCharacterPosition : D.Decoder Range
-decodeCharacterPosition =
-    D.map2
-        Range
-        (D.field "start" D.int)
-        (D.field "end" D.int)
 
 
 
@@ -379,7 +363,7 @@ constantSvgAttributes model =
 
 debouncedVersionOf : (a -> Msg) -> (a -> Msg)
 debouncedVersionOf wrapInMsg a =
-    --DebounceMsg (provideInput (wrapInMsg a))
+    --DebounceMsg (Debouncer.provideInput (wrapInMsg a))
     wrapInMsg a
 
 

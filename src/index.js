@@ -20,8 +20,9 @@ class NodeEditor {
     // Update the text node inside of the <text> element
     // Don't use innerHTML or else it replaces the text node and Elm will get
     //   very confused!
-    this.textElement.childNodes[0].nodeValue =
-      this._normalizeTextForSvgElement(text);
+    this.textElement.childNodes[0].nodeValue = this._normalizeTextForSvgElement(
+      text
+    );
     //console.log("numberOfChars", this.textElement.getNumberOfChars());
     const bbox = this.textElement.getBBox();
 
@@ -33,7 +34,7 @@ class NodeEditor {
       cursorIndex,
       text,
       bbox
-    })
+    });
 
     const detail = {
       nodeId: parseInt(this.nodeId, 10),
@@ -44,7 +45,13 @@ class NodeEditor {
     };
 
     console.log("[JS] dispatching metricsRecalculated", detail);
+    // TODO: Convert this to a port?
     const event = new CustomEvent("metricsRecalculated", { detail });
+    this.textElement.dispatchEvent(event);
+  }
+
+  fireKeyEvent(originalEvent) {
+    const event = new CustomEvent("key", { detail: originalEvent });
     this.textElement.dispatchEvent(event);
   }
 
@@ -85,11 +92,9 @@ class NodeEditor {
     if (text === "") {
       cursorPosition = bbox.x;
     } else if (cursorIndex === text.length) {
-      cursorPosition =
-        this.textElement.getEndPositionOfChar(cursorIndex - 1).x;
+      cursorPosition = this.textElement.getEndPositionOfChar(cursorIndex - 1).x;
     } else {
-      cursorPosition =
-        this.textElement.getStartPositionOfChar(cursorIndex).x;
+      cursorPosition = this.textElement.getStartPositionOfChar(cursorIndex).x;
     }
 
     if (isNaN(cursorPosition)) {
@@ -101,9 +106,11 @@ class NodeEditor {
 }
 
 function isNodeEditorElement(node) {
-  return node.dataset != null &&
+  return (
+    node.dataset != null &&
     node.dataset.id === "node-editor" &&
-    node.dataset.nodeId != null;
+    node.dataset.nodeId != null
+  );
 }
 
 const app = Elm.Main.init({
@@ -114,6 +121,7 @@ const root = document.querySelector("[data-id='root']");
 
 const nodeEditors = {};
 let numMutations = 0;
+let keydownEventListener = null;
 
 const svgTextElementAddedObserver = new MutationObserver(mutations => {
   mutations.forEach(mutation => {
@@ -131,7 +139,10 @@ const svgTextElementAddedObserver = new MutationObserver(mutations => {
         }
       });
       mutation.removedNodes.forEach(node => {
-        if (isNodeEditorElement(node) && !isNodeEditorElement(mutation.nextSibling)) {
+        if (
+          isNodeEditorElement(node) &&
+          !isNodeEditorElement(mutation.nextSibling)
+        ) {
           console.log("[JS] removing node editor");
           delete nodeEditors[node.dataset.nodeId];
         }
@@ -163,4 +174,38 @@ app.ports.calculateNodeContentMetrics.subscribe(change => {
   }
 
   nodeEditor.calculateMetrics(change);
+});
+
+app.ports.startListeningForNodeEditorKeyEvent.subscribe(nodeId => {
+  console.log("[JS] start listening for node editor key event");
+
+  const nodeEditor = nodeEditors[nodeId];
+
+  if (nodeEditor == null) {
+    throw new Error(`Can't find node editor with node id: ${change.nodeId}`);
+  }
+
+  if (keydownEventListener != null) {
+    throw new Error("Something is already listening to keydown.");
+  }
+
+  keydownEventListener = event => {
+    // XXX: this prevents default on ALL keyboard events --
+    // is that what we want??
+    event.preventDefault();
+    nodeEditor.fireKeyEvent(event);
+  };
+  document.addEventListener("keydown", keydownEventListener);
+});
+
+app.ports.stopListeningForNodeEditorKeyEvent.subscribe(() => {
+  console.log("[JS] stop listening for node editor key event");
+
+  if (keydownEventListener == null) {
+    throw new Error("There doesn't seem to be anything listening for keydown.");
+  }
+
+  document.removeEventListener("keydown", keydownEventListener);
+
+  keydownEventListener = null;
 });

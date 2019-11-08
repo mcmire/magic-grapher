@@ -10,7 +10,7 @@ port module NodeContent exposing
     , view
     )
 
-import Browser.Events exposing (onKeyDown)
+import Browser.Events as BE
 import CustomEventListeners exposing (handleCustomEvent)
 import Debug
 import Html.Attributes as HA
@@ -32,6 +32,15 @@ import Types exposing (Range)
 
 
 port calculateNodeContentMetrics : E.Value -> Cmd msg
+
+
+port startListeningForNodeEditorKeyEvent : NodeId -> Cmd msg
+
+
+port stopListeningForNodeEditorKeyEvent : () -> Cmd msg
+
+
+port receiveNodeEditorKeyEvent : (E.Value -> msg) -> Sub msg
 
 
 
@@ -73,6 +82,131 @@ init nodeId =
     -- TODO: Nothing?
     , cursorPosition = 0.0
     }
+
+
+
+-- UPDATE
+
+
+type Change
+    = InsertCharacter String
+    | RemovePreviousCharacter
+    | MoveCursorLeftByChar
+    | MoveCursorLeftByWord
+    | MoveCursorRightByChar
+    | MoveCursorRightByWord
+    | MoveCursorToBeginningOfLine
+    | MoveCursorToEndOfLine
+
+
+type alias MetricsRecalculatedEvent =
+    { nodeId : NodeId
+    , width : Float
+    , height : Float
+    , cursorPosition : Float
+    , text : String
+    }
+
+
+type Msg
+    = DisplayDecodeError D.Error
+    | DoNothing
+    | ReceiveRecalculatedMetrics MetricsRecalculatedEvent
+    | StartEditing
+    | StopEditing
+    | UpdateEditor Change
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
+    case msg of
+        StartEditing ->
+            ( { model | isBeingEdited = True }
+            , startListeningForNodeEditorKeyEvent model.nodeId
+            )
+
+        StopEditing ->
+            ( { model | isBeingEdited = False }
+            , stopListeningForNodeEditorKeyEvent ()
+            )
+
+        UpdateEditor change ->
+            let
+                text =
+                    case change of
+                        InsertCharacter char ->
+                            String.Extra.insertAt
+                                char
+                                model.cursorIndex
+                                model.text
+
+                        RemovePreviousCharacter ->
+                            let
+                                _ =
+                                    Debug.log "Removing character at index" { index = model.cursorIndex - 1 }
+                            in
+                            String.slice 0 (model.cursorIndex - 1) model.text
+                                ++ String.slice
+                                    model.cursorIndex
+                                    (String.length model.text)
+                                    model.text
+
+                        _ ->
+                            model.text
+
+                cursorIndexFn =
+                    case change of
+                        InsertCharacter char ->
+                            moveCursorRightByChar model.cursorIndex
+
+                        RemovePreviousCharacter ->
+                            moveCursorLeftByChar model.cursorIndex
+
+                        MoveCursorLeftByChar ->
+                            moveCursorLeftByChar model.cursorIndex
+
+                        MoveCursorLeftByWord ->
+                            moveCursorLeftByWord model.cursorIndex
+
+                        MoveCursorRightByChar ->
+                            moveCursorRightByChar model.cursorIndex
+
+                        MoveCursorRightByWord ->
+                            moveCursorRightByWord model.cursorIndex
+
+                        MoveCursorToBeginningOfLine ->
+                            moveCursorToBeginningOfLine
+
+                        MoveCursorToEndOfLine ->
+                            moveCursorToEndOfLine
+
+                cursorIndex =
+                    cursorIndexFn text
+
+                newModel =
+                    { model | text = text, cursorIndex = cursorIndex }
+
+                cmd =
+                    calculateNodeContentMetrics
+                        (encodeCalculateMetricsRequest newModel)
+            in
+            ( newModel, cmd )
+
+        ReceiveRecalculatedMetrics event ->
+            let
+                _ =
+                    Debug.log "[Elm] receiving recalculated node content metrics" event
+            in
+            ( { model
+                | width = event.width
+                , height = event.height
+                , cursorPosition = event.cursorPosition
+              }
+            , Cmd.none
+            )
+
+        _ ->
+            ( model, Cmd.none )
 
 
 moveCursorLeftByChar : Int -> String -> Int
@@ -153,6 +287,16 @@ moveCursorRightByWord cursorIndex text =
     normalizeCursorIndex newCursorIndex text
 
 
+moveCursorToBeginningOfLine : String -> Int
+moveCursorToBeginningOfLine text =
+    normalizeCursorIndex 0 text
+
+
+moveCursorToEndOfLine : String -> Int
+moveCursorToEndOfLine text =
+    normalizeCursorIndex (String.length text) text
+
+
 findSurroundingWord : Int -> List Word -> Maybe Word
 findSurroundingWord index words =
     List.Extra.find
@@ -203,116 +347,6 @@ findWordsIn text =
             }
         )
         matches
-
-
-
--- UPDATE
-
-
-type Change
-    = InsertCharacter String
-    | RemovePreviousCharacter
-    | MoveCursorLeftByChar
-    | MoveCursorLeftByWord
-    | MoveCursorRightByChar
-    | MoveCursorRightByWord
-
-
-type alias MetricsRecalculatedEvent =
-    { nodeId : NodeId
-    , width : Float
-    , height : Float
-    , cursorPosition : Float
-    , text : String
-    }
-
-
-type Msg
-    = DisplayDecodeError D.Error
-    | DoNothing
-    | ReceiveRecalculatedMetrics MetricsRecalculatedEvent
-    | StartEditing
-    | StopEditing
-    | UpdateEditor Change
-
-
-update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
-    case msg of
-        StartEditing ->
-            ( { model | isBeingEdited = True }, Cmd.none )
-
-        UpdateEditor change ->
-            let
-                text =
-                    case change of
-                        InsertCharacter char ->
-                            String.Extra.insertAt
-                                char
-                                model.cursorIndex
-                                model.text
-
-                        RemovePreviousCharacter ->
-                            let
-                                _ =
-                                    Debug.log "Removing character at index" { index = model.cursorIndex - 1 }
-                            in
-                            String.slice 0 (model.cursorIndex - 1) model.text
-                                ++ String.slice
-                                    model.cursorIndex
-                                    (String.length model.text)
-                                    model.text
-
-                        _ ->
-                            model.text
-
-                cursorIndexFn =
-                    case change of
-                        InsertCharacter char ->
-                            moveCursorRightByChar
-
-                        RemovePreviousCharacter ->
-                            moveCursorLeftByChar
-
-                        MoveCursorLeftByChar ->
-                            moveCursorLeftByChar
-
-                        MoveCursorLeftByWord ->
-                            moveCursorLeftByWord
-
-                        MoveCursorRightByChar ->
-                            moveCursorRightByChar
-
-                        MoveCursorRightByWord ->
-                            moveCursorRightByWord
-
-                cursorIndex =
-                    cursorIndexFn model.cursorIndex text
-
-                newModel =
-                    { model | text = text, cursorIndex = cursorIndex }
-
-                cmd =
-                    calculateNodeContentMetrics
-                        (encodeCalculateMetricsRequest newModel)
-            in
-            ( newModel, cmd )
-
-        ReceiveRecalculatedMetrics event ->
-            let
-                _ =
-                    Debug.log "[Elm] receiving recalculated node content metrics" event
-            in
-            ( { model
-                | width = event.width
-                , height = event.height
-                , cursorPosition = event.cursorPosition
-              }
-            , Cmd.none
-            )
-
-        _ ->
-            ( model, Cmd.none )
 
 
 encodeCalculateMetricsRequest : Model -> E.Value
@@ -387,6 +421,13 @@ textView model attrs =
                         , onError = DisplayDecodeError
                         }
                     )
+               , SE.on "key"
+                    (handleCustomEvent
+                        { decodeValue = decodeKeyEvent
+                        , onSuccess = mapKeyboardEventToMsg model
+                        , onError = DisplayDecodeError
+                        }
+                    )
                ]
         )
         [ S.text (normalizeTextForSvgElement model.text) ]
@@ -405,12 +446,9 @@ decodeMetricsRecalculatedEvent =
         )
 
 
-decodeCharacterPosition : D.Decoder Range
-decodeCharacterPosition =
-    D.map2
-        Range
-        (D.field "start" D.int)
-        (D.field "end" D.int)
+decodeKeyEvent : D.Decoder KeyboardEvent
+decodeKeyEvent =
+    D.field "detail" decodeKeyboardEvent
 
 
 normalizeTextForSvgElement : String -> String
@@ -456,11 +494,16 @@ cursorView model attrs =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    if model.isBeingEdited then
-        onKeyDown (D.map (mapKeyboardEventToMsg model) decodeKeyboardEvent)
+    --if model.isBeingEdited then
+    ----D.map (mapKeyboardEventToMsg model) receiveNodeEditorKeyEvent
+    --receiveNodeEditorKeyEvent ReceiveKeyEvent
+    --else
+    Sub.none
 
-    else
-        Sub.none
+
+alwaysPreventDefault : msg -> ( msg, Bool )
+alwaysPreventDefault msg =
+    ( msg, True )
 
 
 mapKeyboardEventToMsg : Model -> KeyboardEvent -> Msg
@@ -474,15 +517,21 @@ mapKeyboardEventToMsg model keyboardEvent =
                 UpdateEditor RemovePreviousCharacter
 
             Key.Left ->
-                if keyboardEvent.altKey then
+                if onlyAltKey keyboardEvent then
                     UpdateEditor MoveCursorLeftByWord
+
+                else if onlyMetaKey keyboardEvent then
+                    UpdateEditor MoveCursorToBeginningOfLine
 
                 else
                     UpdateEditor MoveCursorLeftByChar
 
             Key.Right ->
-                if keyboardEvent.altKey then
+                if onlyAltKey keyboardEvent then
                     UpdateEditor MoveCursorRightByWord
+
+                else if onlyMetaKey keyboardEvent then
+                    UpdateEditor MoveCursorToEndOfLine
 
                 else
                     UpdateEditor MoveCursorRightByChar
@@ -505,3 +554,19 @@ mapKeyboardEventToMsg model keyboardEvent =
 
     else
         DoNothing
+
+
+onlyAltKey : KeyboardEvent -> Bool
+onlyAltKey keyboardEvent =
+    keyboardEvent.altKey
+        && not keyboardEvent.ctrlKey
+        && not keyboardEvent.metaKey
+        && not keyboardEvent.shiftKey
+
+
+onlyMetaKey : KeyboardEvent -> Bool
+onlyMetaKey keyboardEvent =
+    not keyboardEvent.altKey
+        && not keyboardEvent.ctrlKey
+        && keyboardEvent.metaKey
+        && not keyboardEvent.shiftKey
