@@ -3,13 +3,13 @@ import { Elm } from "./Main.elm";
 import "reset.css";
 import "./index.css";
 import "./styles/main.css";
+import "./styles/node-content.css";
 
 class NodeEditor {
   constructor(nodeId, element) {
     this.nodeId = nodeId;
     this.element = element;
-    this.visibleTextElement = element.querySelector('[data-id="text-visible"]');
-    this.hiddenTextElement = element.querySelector('[data-id="text-hidden"]');
+    this.textElement = element.querySelector('[data-id="text"]');
     console.log("[JS] node editor initialized!");
   }
 
@@ -20,10 +20,10 @@ class NodeEditor {
     // Update the text node inside of the <text> element
     // Don't use innerHTML or else it replaces the text node and Elm will get
     //   very confused!
-    this.visibleTextElement.childNodes[0].nodeValue =
+    this.textElement.childNodes[0].nodeValue =
       this._normalizeTextForSvgElement(text);
-    //console.log("numberOfChars", this.visibleTextElement.getNumberOfChars());
-    const bbox = this.visibleTextElement.getBBox();
+    //console.log("numberOfChars", this.textElement.getNumberOfChars());
+    const bbox = this.textElement.getBBox();
 
     const cursorIndex = this._normalizeCursorIndex({
       cursorIndex: request.cursorIndex,
@@ -45,7 +45,7 @@ class NodeEditor {
 
     console.log("[JS] dispatching metricsRecalculated", detail);
     const event = new CustomEvent("metricsRecalculated", { detail });
-    this.visibleTextElement.dispatchEvent(event);
+    this.textElement.dispatchEvent(event);
   }
 
   _normalizeTextForSvgElement(text) {
@@ -86,10 +86,10 @@ class NodeEditor {
       cursorPosition = bbox.x;
     } else if (cursorIndex === text.length) {
       cursorPosition =
-        this.visibleTextElement.getEndPositionOfChar(cursorIndex - 1).x;
+        this.textElement.getEndPositionOfChar(cursorIndex - 1).x;
     } else {
       cursorPosition =
-        this.visibleTextElement.getStartPositionOfChar(cursorIndex).x;
+        this.textElement.getStartPositionOfChar(cursorIndex).x;
     }
 
     if (isNaN(cursorPosition)) {

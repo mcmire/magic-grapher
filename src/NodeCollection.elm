@@ -10,13 +10,14 @@ module NodeCollection exposing
 
 import Dict exposing (Dict)
 import Node exposing (Node)
+import NodeContent exposing (Model)
+import NodeId exposing (NodeId)
 import Types exposing (Position)
-import NodeContent exposing (NodeContent)
 
 
 type alias NodeCollection =
-    { entries : Dict Node.Id Node
-    , nextNodeId : Node.Id
+    { entries : Dict NodeId Node
+    , nextNodeId : NodeId
     }
 
 
@@ -46,12 +47,12 @@ insert pos isSelected coll =
     ( newCollection, newNode )
 
 
-get : Node.Id -> NodeCollection -> Maybe Node
+get : NodeId -> NodeCollection -> Maybe Node
 get nodeId coll =
     Dict.get nodeId coll.entries
 
 
-update : Node.Id -> (Node -> Node) -> NodeCollection -> NodeCollection
+update : NodeId -> (Node -> Node) -> NodeCollection -> NodeCollection
 update nodeId fn coll =
     let
         newEntries =
@@ -72,8 +73,8 @@ update nodeId fn coll =
 
 
 updateNodeContentFor :
-    Node.Id
-    -> (NodeContent -> NodeContent)
+    NodeId
+    -> (NodeContent.Model -> NodeContent.Model)
     -> NodeCollection
     -> NodeCollection
 updateNodeContentFor nodeId fn coll =
