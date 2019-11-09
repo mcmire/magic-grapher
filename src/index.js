@@ -210,7 +210,8 @@ app.ports.startListeningForNodeEditorKeyEvent.subscribe(nodeId => {
   const nodeEditor = nodeEditors[nodeId];
 
   if (nodeEditor == null) {
-    throw new Error(`Can't find node editor with node id: ${change.nodeId}`);
+    //throw new Error(`Can't find node editor with node id: ${nodeId}`);
+    // node editor may not be set yet -- wait a bit
   }
 
   if (keydownEventListener != null) {
