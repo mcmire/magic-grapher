@@ -5,12 +5,45 @@ import "./index.css";
 import "./styles/main.css";
 import "./styles/node-content.css";
 
-class NodeEditor {
+class GraphNode {
   constructor(nodeId, element) {
     this.nodeId = nodeId;
     this.element = element;
-    this.textElement = element.querySelector('[data-id="text"]');
-    console.log("[JS] node editor initialized!");
+    this.editorText = new GraphNodeEditorText(
+      element.querySelector('[data-id="editor-text"]')
+    );
+
+    console.log("[JS] graph node initialized!");
+  }
+
+  fireEditorInitEvent() {
+    this.editorText.fireInitEvent();
+  }
+
+  fireEditorKeyEvent(originalEvent) {
+    this.editorText.fireKeyEvent(originalEvent);
+  }
+
+  calculateEditorMetrics(request) {
+    this.editorText.calculateMetrics(request);
+  }
+}
+
+class GraphNodeEditorText {
+  constructor(element) {
+    this.element = element;
+  }
+
+  fireInitEvent(originalEvent) {
+    console.log("[JS] dispatching init event");
+    const event = new CustomEvent("init");
+    this.element.dispatchEvent(event);
+  }
+
+  fireKeyEvent(originalEvent) {
+    console.log("[JS] dispatching key event");
+    const event = new CustomEvent("key", { detail: originalEvent });
+    this.element.dispatchEvent(event);
   }
 
   calculateMetrics(request) {
@@ -20,11 +53,10 @@ class NodeEditor {
     // Update the text node inside of the <text> element
     // Don't use innerHTML or else it replaces the text node and Elm will get
     //   very confused!
-    this.textElement.childNodes[0].nodeValue = this._normalizeTextForSvgElement(
+    this.element.childNodes[0].nodeValue = this._normalizeTextForSvgElement(
       text
     );
-    //console.log("numberOfChars", this.textElement.getNumberOfChars());
-    const bbox = this.textElement.getBBox();
+    const bbox = this.element.getBBox();
 
     const cursorIndex = this._normalizeCursorIndex({
       cursorIndex: request.cursorIndex,
@@ -37,7 +69,7 @@ class NodeEditor {
     });
 
     const detail = {
-      nodeId: parseInt(this.nodeId, 10),
+      nodeId: parseInt(request.nodeId, 10),
       width: bbox.width,
       height: bbox.height,
       cursorPosition: cursorPosition,
@@ -47,22 +79,13 @@ class NodeEditor {
     console.log("[JS] dispatching metricsRecalculated", detail);
     // TODO: Convert this to a port?
     const event = new CustomEvent("metricsRecalculated", { detail });
-    this.textElement.dispatchEvent(event);
-  }
-
-  fireKeyEvent(originalEvent) {
-    const event = new CustomEvent("key", { detail: originalEvent });
-    this.textElement.dispatchEvent(event);
+    this.element.dispatchEvent(event);
   }
 
   _normalizeTextForSvgElement(text) {
-    if (text[text.length - 1] === " ") {
-      // HTML/SVG will strip trailing spaces, which affects how we figure out
-      // the positions of each character in the node
-      return text.slice(0, -1) + " ";
-    } else {
-      return text;
-    }
+    // HTML/SVG will strip leading and trailing spaces, which affects how we
+    // figure out the positions of each character in the node
+    return text.replace(/^[ ]/, " ").replace(/[ ]$/, " ");
   }
 
   _normalizeCursorIndex({ cursorIndex, text }) {
@@ -85,16 +108,14 @@ class NodeEditor {
     //
     //   https://www.w3.org/TR/SVG2/text.html#TextSelectionImplementationNotes
 
-    console.log("cursorIndex", cursorIndex, "text.length", text.length);
-
     let cursorPosition;
 
     if (text === "") {
       cursorPosition = bbox.x;
     } else if (cursorIndex === text.length) {
-      cursorPosition = this.textElement.getEndPositionOfChar(cursorIndex - 1).x;
+      cursorPosition = this.element.getEndPositionOfChar(cursorIndex - 1).x;
     } else {
-      cursorPosition = this.textElement.getStartPositionOfChar(cursorIndex).x;
+      cursorPosition = this.element.getStartPositionOfChar(cursorIndex).x;
     }
 
     if (isNaN(cursorPosition)) {
@@ -105,10 +126,18 @@ class NodeEditor {
   }
 }
 
-function isNodeEditorElement(node) {
+function isGraphNodeElement(node) {
   return (
     node.dataset != null &&
-    node.dataset.id === "node-editor" &&
+    node.dataset.id === "graph-node" &&
+    node.dataset.nodeId != null
+  );
+}
+
+function isGraphNodeTextElement(node) {
+  return (
+    node.dataset != null &&
+    node.dataset.id === "graph-node" &&
     node.dataset.nodeId != null
   );
 }
@@ -125,7 +154,7 @@ function isInterestingKeyEvent(event) {
       (onlyAltKeyPressed(event) ||
         onlyMetaKeyPressed(event) ||
         noModifierKeysPressed(event))) ||
-    event.key.length === 1
+    isNonControlCharacter(event)
   );
 }
 
@@ -141,13 +170,18 @@ function noModifierKeysPressed(event) {
   return !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
 }
 
+// <https://stackoverflow.com/questions/12467240/determine-if-javascript-e-keycode-is-a-printable-non-control-character/12467610>
+function isNonControlCharacter(event) {
+  return event.key.length === 1;
+}
+
 const app = Elm.Main.init({
   node: document.querySelector("main")
 });
 
-const root = document.querySelector("[data-id='root']");
+const svgElement = document.querySelector("svg");
 
-const nodeEditors = {};
+const graphNodes = {};
 let numMutations = 0;
 let keydownEventListener = null;
 
@@ -157,68 +191,63 @@ const svgTextElementAddedObserver = new MutationObserver(mutations => {
     numMutations++;
 
     if (mutation.type === "childList") {
-      mutation.addedNodes.forEach(node => {
-        if (isNodeEditorElement(node)) {
-          console.log(`[JS] adding node editor: ${node.dataset.nodeId}`);
-          nodeEditors[node.dataset.nodeId] = new NodeEditor(
-            node.dataset.nodeId,
-            node
-          );
-        }
-      });
       mutation.removedNodes.forEach(node => {
-        if (
-          isNodeEditorElement(node) &&
-          !isNodeEditorElement(mutation.nextSibling)
-        ) {
-          console.log("[JS] removing node editor");
-          delete nodeEditors[node.dataset.nodeId];
+        if (isGraphNodeElement(node)) {
+          console.log(`[JS] removing graph node: ${node.dataset.nodeId}`);
+          delete graphNodes[node.dataset.nodeId];
         }
       });
-    } else if (mutation.type === "characterData") {
-      // mutation.target is a text node, go up to the text ELEMENT
-      const element = mutation.target.parentElement;
 
-      if (element === this) {
-        this._dispatch("change");
-      }
+      mutation.addedNodes.forEach(node => {
+        console.log("node", node);
+
+        if (isGraphNodeElement(node)) {
+          console.log(`[JS] adding graph node: ${node.dataset.nodeId}`);
+          const graphNode = new GraphNode(node.dataset.nodeId, node);
+          graphNodes[node.dataset.nodeId] = graphNode;
+          graphNode.fireEditorInitEvent();
+        }
+      });
     }
   });
 });
 
-svgTextElementAddedObserver.observe(root, {
-  //characterDataOldValue: true,
+svgTextElementAddedObserver.observe(svgElement, {
   childList: true,
   subtree: true
 });
 
 app.ports.calculateNodeContentMetrics.subscribe(change => {
-  console.log("[JS] receiving request to calculateNodeContentMetrics");
+  console.log("[JS] receiving request to calculateNodeContentMetrics", change);
 
-  const nodeEditor = nodeEditors[change.nodeId];
+  const graphNode = graphNodes[change.nodeId];
 
-  if (nodeEditor == null) {
-    throw new Error(`Can't find node editor with node id: ${change.nodeId}`);
+  if (graphNode == null) {
+    throw new Error(
+      `[calculateNodeContentMetrics] Can't find graph node with node id: ${change.nodeId}`
+    );
   }
 
-  nodeEditor.calculateMetrics(change);
+  graphNode.calculateEditorMetrics(change);
 });
 
 app.ports.startListeningForNodeEditorKeyEvent.subscribe(nodeId => {
-  console.log("[JS] start listening for node editor key event");
-
-  const nodeEditor = nodeEditors[nodeId];
-
-  if (nodeEditor == null) {
-    //throw new Error(`Can't find node editor with node id: ${nodeId}`);
-    // node editor may not be set yet -- wait a bit
-  }
+  console.log("[JS] start listening for graph node key event");
 
   if (keydownEventListener != null) {
     throw new Error("Something is already listening to keydown.");
   }
 
   keydownEventListener = event => {
+    const graphNode = graphNodes[nodeId];
+
+    if (graphNode == null) {
+      throw new Error(
+        `[startListeningForNodeEditorKeyEvent] ` +
+          `Can't find graph node with node id: ${nodeId}`
+      );
+    }
+
     if (event.metaKey && event.key === "r") {
       window.reload();
     }
@@ -227,8 +256,9 @@ app.ports.startListeningForNodeEditorKeyEvent.subscribe(nodeId => {
       event.preventDefault();
     }
 
-    nodeEditor.fireKeyEvent(event);
+    graphNode.fireEditorKeyEvent(event);
   };
+
   document.addEventListener("keydown", keydownEventListener);
 });
 

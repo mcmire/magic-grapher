@@ -52,10 +52,7 @@ and the program itself doesn't support some features you'd think would be there.
 So not only does it prove that text is a bad way to specify a graph,
 but its limitations only result in frustration.
 
-So if a textual interface isn't the way to go,
-and if the existing graphical interfaces are insufficient,
-what's the only option?
-Make my own app, of course :)
+## Goals
 
 Here are some of the goals of this app:
 
@@ -91,3 +88,7 @@ Now run:
 And finally visit:
 
     http://localhost:1234/
+
+To run tests, say:
+
+    npm run test

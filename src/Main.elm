@@ -25,6 +25,7 @@ import Styles.Main as Styles
 import Svg as S
 import Svg.Attributes as SA
 import Svg.Events as SE
+import Svg.Keyed as SK
 import Task
 import Tuple
 import Types exposing (Dimensions, Position, Range)
@@ -42,6 +43,11 @@ main =
 
 
 -- MODEL
+
+
+type NodeType
+    = Placed
+    | Unplaced
 
 
 type State
@@ -146,10 +152,7 @@ update msg model =
                 ( newNodes, newNode ) =
                     NodeCollection.insert pos True model.nodes
             in
-            -- TODO: Make a "select" msg?
-            update
-                (UpdateNodeContent newNode.id NodeContent.startEditing)
-                { model | nodes = newNodes }
+            ( { model | nodes = newNodes }, Cmd.none )
 
         ReturnToWaitingForFirstAction ->
             ( { model | state = WaitingForFirstAction }, Cmd.none )
@@ -188,6 +191,9 @@ update msg model =
                                     NodeContent.update
                                         subMsg
                                         node.content
+
+                                _ =
+                                    Debug.log "new content" newContent
 
                                 newState =
                                     UpdatingNodeContent nodeId
@@ -310,7 +316,7 @@ mainChildren model =
     [ H.div
         [ HA.class Styles.debug ]
         [ H.text ("State: " ++ describeModelState model) ]
-    , S.svg
+    , SK.node "svg"
         (svgAttributes model)
         (nodeElementToBePlaced model ++ placedNodeElements model)
     ]
@@ -378,20 +384,13 @@ svgAttributesWhileWaitingForNodeToBePlaced model =
             []
 
 
-nodeElementToBePlaced : Model -> List (H.Html Msg)
+nodeElementToBePlaced : Model -> List ( String, S.Svg Msg )
 nodeElementToBePlaced model =
     case model.state of
         WaitingForNodeToBePlaced ->
             case model.mouse.pos of
                 Just pos ->
-                    [ nodeElement
-                        model
-                        (Node.unplacedAt pos)
-                        [ SA.stroke (colorToCssHsla unselectedNodeBorderColor)
-                        , SA.fill "white"
-                        , SA.opacity "0.6"
-                        ]
-                    ]
+                    [ ( "unplacedNode", unplacedNodeElement model pos ) ]
 
                 Nothing ->
                     []
@@ -400,12 +399,12 @@ nodeElementToBePlaced model =
             []
 
 
-placedNodeElements : Model -> List (S.Svg Msg)
+placedNodeElements : Model -> List ( String, S.Svg Msg )
 placedNodeElements model =
     List.map (placedNodeElement model) (NodeCollection.values model.nodes)
 
 
-placedNodeElement : Model -> Node -> S.Svg Msg
+placedNodeElement : Model -> Node -> ( String, S.Svg Msg )
 placedNodeElement model node =
     let
         nodeBorderColor =
@@ -415,30 +414,54 @@ placedNodeElement model node =
             else
                 unselectedNodeBorderColor
     in
-    nodeElement
+    ( "placedNode" ++ String.fromInt node.id
+    , nodeElement
         model
         node
+        [ HA.attribute "data-id" "graph-node"
+        , HA.attribute "data-node-id" (String.fromInt node.id)
+        ]
         [ SA.stroke (colorToCssHsla nodeBorderColor)
         , SA.fill (colorToCssHsla unselectedNodeFillColor)
         ]
+    )
 
 
-nodeElement : Model -> Node -> List (S.Attribute Msg) -> S.Svg Msg
-nodeElement model node attrs =
-    S.g
-        [ SA.transform
-            ("translate("
-                ++ String.fromFloat node.pos.x
-                ++ " "
-                ++ String.fromFloat node.pos.y
-                ++ ")"
-            )
+unplacedNodeElement : Model -> Position -> S.Svg Msg
+unplacedNodeElement model pos =
+    nodeElement
+        model
+        (Node.unplacedAt pos)
+        []
+        [ SA.stroke (colorToCssHsla unselectedNodeBorderColor)
+        , SA.fill "white"
+        , SA.opacity "0.6"
         ]
-        (nodeBackground node attrs
-            ++ [ nodeForeground node attrs ]
+
+
+nodeElement :
+    Model
+    -> Node
+    -> List (S.Attribute Msg)
+    -> List (S.Attribute Msg)
+    -> S.Svg Msg
+nodeElement model node groupAttrs nodeAttrs =
+    S.g
+        (groupAttrs
+            ++ [ SA.transform
+                    ("translate("
+                        ++ String.fromFloat node.pos.x
+                        ++ " "
+                        ++ String.fromFloat node.pos.y
+                        ++ ")"
+                    )
+               ]
+        )
+        (nodeBackground node nodeAttrs
+            ++ [ nodeForeground node nodeAttrs ]
             ++ [ S.map
                     (UpdateNodeContent node.id)
-                    (nodeContentView model node.content attrs)
+                    (nodeContentView model node.content nodeAttrs)
                ]
         )
 

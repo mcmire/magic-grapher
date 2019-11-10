@@ -4,7 +4,9 @@
   "description": "Generate graphs, easy!",
   "main": "index.js",
   "scripts": {
-    "start": "parcel src/index.html"
+    "start": "parcel src/index.html",
+    "cypress:open": "cypress open",
+    "test": "cypress run"
   },
   "repository": {
     "type": "git",
@@ -13,6 +15,7 @@
   "author": "Elliot Winkler <elliot.winkler@gmail.com>",
   "license": "MIT",
   "devDependencies": {
+    "cypress": "^3.6.1",
     "elm-format": "^0.8.2",
     "elm-hot": "^1.1.2",
     "elm-json": "^0.2.2",

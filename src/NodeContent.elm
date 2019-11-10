@@ -386,17 +386,16 @@ mapToDisplayDecodeError msg =
 view : Model -> List (S.Attribute Msg) -> S.Svg Msg
 view model attrs =
     let
+        _ =
+            Debug.log "[NodeContent] rendering view"
+
         textViews =
             [ textView model attrs ]
 
         cursorViews =
             cursorView model attrs
     in
-    S.g
-        [ HA.attribute "data-id" "node-editor"
-        , HA.attribute "data-node-id" (String.fromInt model.nodeId)
-        ]
-        (textViews ++ cursorViews)
+    S.g [] (textViews ++ cursorViews)
 
 
 textView : Model -> List (S.Attribute Msg) -> S.Svg Msg
@@ -409,22 +408,24 @@ textView model attrs =
                , SA.dominantBaseline "central"
                , SA.textAnchor "middle"
                , SA.fontSize (String.fromFloat model.fontSize ++ "px")
-               , HA.attribute "data-id" "text"
+               , HA.attribute "data-id" "editor-text"
+               , HA.attribute "data-node-id" (String.fromInt model.nodeId)
                , HA.attribute "data-width"
                     (String.fromFloat model.width)
                , HA.attribute "data-height"
                     (String.fromFloat model.height)
-               , SE.on "metricsRecalculated"
-                    (handleCustomEvent
-                        { decodeValue = decodeMetricsRecalculatedEvent
-                        , onSuccess = ReceiveRecalculatedMetrics
-                        , onError = DisplayDecodeError
-                        }
-                    )
+               , SE.on "init" (D.succeed StartEditing)
                , SE.on "key"
                     (handleCustomEvent
                         { decodeValue = decodeKeyEvent
                         , onSuccess = mapKeyboardEventToMsg model
+                        , onError = DisplayDecodeError
+                        }
+                    )
+               , SE.on "metricsRecalculated"
+                    (handleCustomEvent
+                        { decodeValue = decodeMetricsRecalculatedEvent
+                        , onSuccess = ReceiveRecalculatedMetrics
                         , onError = DisplayDecodeError
                         }
                     )
@@ -453,16 +454,18 @@ decodeKeyEvent =
 
 normalizeTextForSvgElement : String -> String
 normalizeTextForSvgElement text =
-    case String.uncons (String.reverse text) of
-        Just ( lastChar, rest ) ->
-            if lastChar == ' ' then
-                String.reverse (String.cons '\u{00A0}' rest)
+    let
+        leadingSpaceRegex =
+            Maybe.withDefault Regex.never <|
+                Regex.fromString "^[ ]"
 
-            else
-                text
-
-        Nothing ->
-            text
+        trailingSpaceRegex =
+            Maybe.withDefault Regex.never <|
+                Regex.fromString "[ ]$"
+    in
+    text
+        |> Regex.replace leadingSpaceRegex (\_ -> "\u{00A0}")
+        |> Regex.replace trailingSpaceRegex (\_ -> "\u{00A0}")
 
 
 cursorView : Model -> List (S.Attribute msg) -> List (S.Svg msg)
@@ -480,6 +483,7 @@ cursorView model attrs =
             , SA.height (String.fromFloat model.fontSize)
             , SA.shapeRendering "crispEdges"
             , SA.class Styles.blink
+            , HA.attribute "data-testid" "cursor"
             ]
             []
         ]
@@ -497,13 +501,12 @@ subscriptions model =
     Sub.none
 
 
-alwaysPreventDefault : msg -> ( msg, Bool )
-alwaysPreventDefault msg =
-    ( msg, True )
-
-
 mapKeyboardEventToMsg : Model -> KeyboardEvent -> Msg
 mapKeyboardEventToMsg model keyboardEvent =
+    let
+        _ =
+            Debug.log "node is being edited" model.isBeingEdited
+    in
     if model.isBeingEdited then
         case keyboardEvent.keyCode of
             Key.Escape ->
