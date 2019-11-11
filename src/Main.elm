@@ -175,12 +175,6 @@ update msg model =
 
                 _ ->
                     let
-                        _ =
-                            Debug.log "[Elm] updating node content"
-                                { nodeId = nodeId
-                                , subMsg = subMsg
-                                }
-
                         maybeNode =
                             NodeCollection.get nodeId model.nodes
                     in
@@ -191,9 +185,6 @@ update msg model =
                                     NodeContent.update
                                         subMsg
                                         node.content
-
-                                _ =
-                                    Debug.log "new content" newContent
 
                                 newState =
                                     UpdatingNodeContent nodeId

@@ -12,7 +12,6 @@ port module NodeContent exposing
 
 import Browser.Events as BE
 import CustomEventListeners exposing (handleCustomEvent)
-import Debug
 import Html.Attributes as HA
 import Json.Decode as D
 import Json.Encode as E
@@ -141,10 +140,6 @@ update msg model =
                                 model.text
 
                         RemovePreviousCharacter ->
-                            let
-                                _ =
-                                    Debug.log "Removing character at index" { index = model.cursorIndex - 1 }
-                            in
                             String.slice 0 (model.cursorIndex - 1) model.text
                                 ++ String.slice
                                     model.cursorIndex
@@ -193,10 +188,6 @@ update msg model =
             ( newModel, cmd )
 
         ReceiveRecalculatedMetrics event ->
-            let
-                _ =
-                    Debug.log "[Elm] receiving recalculated node content metrics" event
-            in
             ( { model
                 | width = event.width
                 , height = event.height
@@ -386,9 +377,6 @@ mapToDisplayDecodeError msg =
 view : Model -> List (S.Attribute Msg) -> S.Svg Msg
 view model attrs =
     let
-        _ =
-            Debug.log "[NodeContent] rendering view"
-
         textViews =
             [ textView model attrs ]
 
@@ -503,10 +491,6 @@ subscriptions model =
 
 mapKeyboardEventToMsg : Model -> KeyboardEvent -> Msg
 mapKeyboardEventToMsg model keyboardEvent =
-    let
-        _ =
-            Debug.log "node is being edited" model.isBeingEdited
-    in
     if model.isBeingEdited then
         case keyboardEvent.keyCode of
             Key.Escape ->
@@ -543,10 +527,6 @@ mapKeyboardEventToMsg model keyboardEvent =
                     DoNothing
 
             _ ->
-                let
-                    _ =
-                        Debug.log "Key" keyboardEvent.key
-                in
                 case keyboardEvent.key of
                     Just key ->
                         if String.length key == 1 then
