@@ -1,4 +1,4 @@
-# Magic Grapher
+# Magic Grapher ![build status](https://github.com/mcmire/magic-grapher/workflows/build/badge.svg)
 
 Draw and generate hierarchical diagrams with ease.
 
