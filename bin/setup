@@ -154,6 +154,17 @@ install-development-libraries() {
   install rpm=zlib-devel
 }
 
+provision-jq() {
+  ensure-jq-installed
+}
+
+ensure-jq-installed() {
+  if ! has-executable jq; then
+    banner "Installing jq"
+    install jq
+  fi
+}
+
 provision-node() {
   if [[ -f .node-version ]]; then
     REQUIRED_NODE_VERSION=$(cat .node-version)
@@ -179,10 +190,10 @@ ensure-node-installed() {
       nodenv install --skip-existing "$REQUIRED_NODE_VERSION"
     fi
   elif has-executable nvm; then
-    if ! (nvm list | grep $required_node_version'\>' &>/dev/null); then
-      banner "Installing node $required_node_version with nvm"
-      nvm install $required_node_version
-      nvm use $required_node_version
+    if ! (nvm list | grep $REQUIRED_NODE_VERSION'\>' &>/dev/null); then
+      banner "Installing node $REQUIRED_NODE_VERSION with nvm"
+      nvm install $REQUIRED_NODE_VERSION
+      nvm use $REQUIRED_NODE_VERSION
     fi
   else
     error "You don't seem to have a Node manager installed."
@@ -217,27 +228,49 @@ before you can run this script.
 }
 
 provision-elm() {
-  local platform=$(determine-platform)
+  if has-executable elm; then
+    INSTALLED_ELM_VERSION=$(elm --version)
+  else
+    INSTALLED_ELM_VERSION=""
+  fi
 
+  REQUIRED_ELM_VERSION=$(cat elm.json | jq '."elm-version"' | sed -e 's/^"//; s/"$//')
+
+  ensure-elm-installed
+}
+
+ensure-elm-installed() {
   if ! has-executable elm; then
     banner "Installing Elm"
 
-    print-wrapped "\
-It doesn't look like you have Elm installed.
+    if [[ $platform == "mac" ]]; then
+      curl -L -o elm.gz https://github.com/elm/compiler/releases/download/0.19.0/binary-for-mac-64-bit.gz &&
+        gunzip elm.gz &&
+        chmod +x elm &&
+        sudo mv elm /usr/local/bin/
+    else
+      error "It doesn't seem Elm is installed."
+      print-wrapped "
+Unfortunately, I don't know how to install Elm for your platform. Please follow
+the directions here and then re-run this script:
 
-Please follow the installation instructions on the official Elm guide to do so:
+    https://guide.elm-lang.org/install/elm.html"
+      exit 1
+    fi
+  fi
 
-    https://guide.elm-lang.org/install/elm.html
-    "
+  if [[ $INSTALLED_ELM_VERSION != $REQUIRED_ELM_VERSION ]]; then
+    error "Your project requires Elm $REQUIRED_ELM_VERSION, but you're using Elm $INSTALLED_ELM_VERSION."
+    print-wrapped "Please uninstall Elm and then re-run this script."
     exit 1
   fi
 
   if ! has-executable elm-json; then
     npm install -g elm-json
+  fi
 
-    if has-executable nodenv; then
-      nodenv rehash
-    fi
+  if has-executable nodenv; then
+    nodenv rehash
   fi
 }
 
