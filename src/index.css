@@ -1,8 +1,4 @@
-html, body {
-  width: 100%;
-  height: 100%;
-}
-
-* {
-  box-sizing: border-box;
-}
+@import "reset.css";
+@import "./styles/global.css";
+@import "./styles/main.css";
+@import "./styles/node-content.css";
