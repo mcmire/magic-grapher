@@ -26,11 +26,6 @@ jobs:
         with:
           path: ~/.npm
           key: build-npm-${{ hashFiles('**/package-lock.json') }}
-      #- name: Cache Cypress binary
-        #uses: actions/cache@v1
-        #with:
-          #path: ~/.cache/Cypress
-          #key: build-cypress-${{ hashFiles('**/package.json') }}
       - name: "Install JavaScript dependencies"
         env:
           # make sure every Cypress install prints minimal information
