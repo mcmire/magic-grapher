@@ -1,3 +1,5 @@
+import "./index.css";
+
 import { Elm } from "./Main.elm";
 
 class GraphNode {

@@ -23,7 +23,6 @@ import Maybe.Extra
 import NodeId exposing (NodeId)
 import Regex
 import String.Extra
-import Styles.NodeContent as Styles
 import Svg as S
 import Svg.Attributes as SA
 import Svg.Events as SE
@@ -470,7 +469,7 @@ cursorView model attrs =
             , SA.width "2"
             , SA.height (String.fromFloat model.fontSize)
             , SA.shapeRendering "crispEdges"
-            , SA.class Styles.blink
+            , SA.class "blink"
             , HA.attribute "data-testid" "cursor"
             ]
             []

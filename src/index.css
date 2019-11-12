@@ -1,4 +1,66 @@
 @import "reset.css";
-@import "./styles/global.css";
-@import "./styles/main.css";
-@import "./styles/node-content.css";
+
+/* GLOBAL */
+
+html, body {
+  width: 100%;
+  height: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* MAIN */
+
+.errors {
+  position: fixed;
+  top: 0px;
+  left: 0px;
+  text-align: center;
+  background-color: silver;
+  border-left: 1px solid red;
+  border-bottom: 1px solid red;
+}
+
+.errors__header {
+  background-color: red;
+  padding: 5px;
+  color: white;
+}
+
+.errors__body {
+  padding: 15px;
+}
+
+.debug {
+  position: fixed;
+  top: 0px;
+  right: 0px;
+  padding: 15px;
+  text-align: center;
+  background-color: silver;
+  border-left: 1px solid black;
+  border-bottom: 1px solid black;
+}
+
+.world {
+  height: 100vh;
+  width: 100vw;
+}
+
+/* NODE CONTENT */
+
+.blink {
+  animation-duration: 1s;
+  animation-iteration-count: infinite;
+  animation-name: blink;
+}
+
+@keyframes blink {
+  from { opacity: 1; }
+  13%  { opacity: 0; }
+  50%  { opacity: 0; }
+  63%  { opacity: 1; }
+  to   { opacity: 1; }
+}

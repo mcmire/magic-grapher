@@ -21,7 +21,6 @@ import NodeContent
 import NodeId exposing (NodeId)
 import RoundedRectangle exposing (roundedRect)
 import String exposing (concat, slice)
-import Styles.Main as Styles
 import Svg as S
 import Svg.Attributes as SA
 import Svg.Events as SE
@@ -305,7 +304,7 @@ view model =
 mainChildren : Model -> List (H.Html Msg)
 mainChildren model =
     [ H.div
-        [ HA.class Styles.debug ]
+        [ HA.class "debug" ]
         [ H.text ("State: " ++ describeModelState model) ]
     , SK.node "svg"
         (svgAttributes model)
@@ -321,12 +320,12 @@ withErrorsContainer model elements =
     else
         elements
             ++ [ H.div
-                    [ HA.class Styles.errors ]
+                    [ HA.class "errors" ]
                     [ H.div
-                        [ HA.class Styles.errorsHeader ]
+                        [ HA.class "errors__header" ]
                         [ H.text "Errors" ]
                     , H.div
-                        [ HA.class Styles.errorsBody ]
+                        [ HA.class "errors__body" ]
                         (List.map
                             (\message -> H.p [] [ H.text message ])
                             model.errorMessages
@@ -343,7 +342,7 @@ svgAttributes model =
 
 constantSvgAttributes : Model -> List (S.Attribute Msg)
 constantSvgAttributes model =
-    [ SA.class Styles.world
+    [ SA.class "world"
     , SA.viewBox
         (joinIntsWith
             " "
