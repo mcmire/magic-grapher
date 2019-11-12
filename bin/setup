@@ -240,11 +240,19 @@ provision-elm() {
 }
 
 ensure-elm-installed() {
-  if ! has-executable elm; then
-    banner "Installing Elm"
+  local platform=$(determine-platform)
+
+  if has-executable elm; then
+    if [[ $INSTALLED_ELM_VERSION != $REQUIRED_ELM_VERSION ]]; then
+      error "Your project requires Elm $REQUIRED_ELM_VERSION, but you're using Elm $INSTALLED_ELM_VERSION."
+      print-wrapped "Please uninstall Elm and then re-run this script."
+      exit 1
+    fi
+  else
+    banner "Installing Elm $REQUIRED_ELM_VERSION"
 
     if [[ $platform == "mac" ]]; then
-      curl -L -o elm.gz https://github.com/elm/compiler/releases/download/0.19.0/binary-for-mac-64-bit.gz &&
+      curl -L -o elm.gz https://github.com/elm/compiler/releases/download/$REQUIRED_ELM_VERSION/binary-for-mac-64-bit.gz &&
         gunzip elm.gz &&
         chmod +x elm &&
         sudo mv elm /usr/local/bin/
@@ -257,12 +265,6 @@ the directions here and then re-run this script:
     https://guide.elm-lang.org/install/elm.html"
       exit 1
     fi
-  fi
-
-  if [[ $INSTALLED_ELM_VERSION != $REQUIRED_ELM_VERSION ]]; then
-    error "Your project requires Elm $REQUIRED_ELM_VERSION, but you're using Elm $INSTALLED_ELM_VERSION."
-    print-wrapped "Please uninstall Elm and then re-run this script."
-    exit 1
   fi
 
   if ! has-executable elm-json; then
