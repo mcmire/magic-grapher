@@ -31,17 +31,17 @@ jobs:
           command: "npx cypress verify"
       - run:
           name: "Pre-build Elm app"
-          command: "npm run ci:prebuild"
+          command: "bin/ci-prebuild"
       - run:
           name: "Build app"
-          command: "npm run build"
+          command: "bin/build"
       - save_cache:
           paths:
             - elm-stuff
           key: v1-elm-{{ checksum "elm.json" }}
       - run:
           name: "Run tests"
-          command: "npm run ci"
+          command: "bin/ci"
 workflows:
   version: 2.1
   build:

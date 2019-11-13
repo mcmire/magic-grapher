@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+exec npx concurrently --kill-others --kill-others-on-fail "bin/serve" "bin/test"

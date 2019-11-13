@@ -86,7 +86,7 @@ Run:
 
 Now run:
 
-    npm run start
+    bin/start-dev
 
 And finally visit:
 
@@ -94,4 +94,4 @@ And finally visit:
 
 To run tests, say:
 
-    npm run test
+    bin/start-test

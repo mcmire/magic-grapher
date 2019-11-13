@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+exec elm make src/Main.elm --output dist/index.html --optimize +RTS -N4
