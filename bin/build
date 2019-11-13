@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+set -exuo pipefail
+
+elm make src/Main.elm --output dist/index.html
+rm -rf dist
+mkdir dist
+parcel build --log-level 4 src/index.html
+touch dist/favicon.ico

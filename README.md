@@ -1,6 +1,6 @@
-# Magic Grapher ![build status](https://github.com/mcmire/magic-grapher/workflows/Build/badge.svg)
+# Magic Grapher ![build status](https://img.shields.io/circleci/build/github/mcmire/magic-grapher)
 
-Draw and generate hierarchical diagrams with ease.
+Draw and generate hierarchical diagrams with ease. aslkdfj
 
 ## Background
 

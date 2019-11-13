@@ -1,0 +1,49 @@
+version: 2.1
+orbs:
+  cypress: cypress-io/cypress@1.13.0
+jobs:
+  build:
+    working_directory: ~/magic-grapher
+    docker:
+      - image: circleci/node:10.16.3-buster-browsers
+    steps:
+      - run:
+          name: "Install Elm"
+          command: |
+            curl -L -o elm.gz https://github.com/elm/compiler/releases/download/0.19.1/binary-for-linux-64-bit.gz &&
+              gunzip elm.gz &&
+              chmod +x elm &&
+              sudo mv elm /usr/local/bin/
+      - checkout
+      - restore_cache:
+          keys:
+            - v2-npm-{{ checksum "package-lock.json" }}
+      - run:
+          name: "Install JavaScript dependencies"
+          command: npm install
+      - save_cache:
+          paths:
+            - node_modules
+            - ~/.cache/Cypress
+          key: v2-npm-{{ checksum "package-lock.json" }}
+      - run:
+          name: "Verify Cypress"
+          command: "npx cypress verify"
+      - run:
+          name: "Pre-build Elm app"
+          command: "npm run ci:prebuild"
+      - run:
+          name: "Build app"
+          command: "npm run build"
+      - save_cache:
+          paths:
+            - elm-stuff
+          key: v1-elm-{{ checksum "elm.json" }}
+      - run:
+          name: "Run tests"
+          command: "npm run ci"
+workflows:
+  version: 2.1
+  build:
+    jobs:
+      - build
