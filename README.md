@@ -1,4 +1,7 @@
-# Magic Grapher ![build status](https://img.shields.io/circleci/build/github/mcmire/magic-grapher)
+# Magic Grapher [![build status][circleci-badge]][circleci]
+
+[circleci-badge]: https://img.shields.io/circleci/build/github/mcmire/magic-grapher
+[circleci]: https://app.circleci.com/github/mcmire/magic-grapher/pipelines
 
 Draw and generate hierarchical diagrams with ease.
 
