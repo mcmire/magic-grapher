@@ -1,6 +1,6 @@
 # Magic Grapher ![build status](https://img.shields.io/circleci/build/github/mcmire/magic-grapher)
 
-Draw and generate hierarchical diagrams with ease. aslkdfj
+Draw and generate hierarchical diagrams with ease.
 
 ## Background
 
