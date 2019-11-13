@@ -86,12 +86,12 @@ Run:
 
 Now run:
 
-    npm run start
+    npm run start-dev
 
 And finally visit:
 
     http://localhost:1234/
 
-To run tests, say:
+To run UI tests, say:
 
-    npm run test
+    npm run start-test

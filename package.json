@@ -4,13 +4,13 @@
   "description": "Generate graphs, easy!",
   "main": "index.js",
   "scripts": {
-    "start": "parcel serve --log-level 4 src/index.html",
+    "start-dev": "parcel serve --log-level 4 src/index.html",
+    "start-test": "cypress open",
     "test": "cypress run",
-    "cy": "cypress open",
     "build": "./bin/build",
     "ci:prebuild": "elm make src/Main.elm --output dist/index.html --optimize +RTS -N4",
-    "ci:start": "serve --no-clipboard --listen ${PORT:-1234} dist",
-    "ci": "run-p --race ci:start test"
+    "ci:serve": "serve --no-clipboard --listen ${PORT:-1234} dist",
+    "ci": "run-p --race ci:serve test"
   },
   "repository": {
     "type": "git",
