@@ -1,4 +1,4 @@
-describe("Entering text for a new node", () => {
+describe("Adding a new node", () => {
   const expectedY = "-8";
 
   function getBody() {
