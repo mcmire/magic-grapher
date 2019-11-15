@@ -1,4 +1,4 @@
-module Main exposing (main)
+port module Main exposing (main)
 
 import Browser
 import Browser.Dom as Dom exposing (Viewport)
@@ -29,6 +29,9 @@ import Task
 import Tuple
 import Types exposing (Dimensions, Position, Range)
 import VirtualDom as V
+
+
+port determineNodeContentCursorIndex : E.Value -> Cmd msg
 
 
 main =
@@ -93,6 +96,7 @@ type Msg
     = AdjustViewboxFromInitial Viewport
     | AdjustViewboxFromResize Int Int
     | DebounceMsg (Debouncer.Msg Msg)
+    | DetermineNodeContentCursorIndex NodeId Position
     | DisplayCouldNotFindNodeError NodeId
     | DisplayDecodeError D.Error
     | DoNothing
@@ -128,6 +132,12 @@ update msg model =
 
         DebounceMsg subMsg ->
             Debouncer.update update updateDebouncer subMsg model
+
+        DetermineNodeContentCursorIndex nodeId pos ->
+            ( model
+            , determineNodeContentCursorIndex
+                (encodeDetermineNodeContentCursorIndexRequest nodeId pos)
+            )
 
         DisplayCouldNotFindNodeError nodeId ->
             ( { model
@@ -206,6 +216,19 @@ update msg model =
             ( { model | state = WaitingForNodeToBePlaced }
             , Cmd.none
             )
+
+
+encodeDetermineNodeContentCursorIndexRequest : NodeId -> Position -> E.Value
+encodeDetermineNodeContentCursorIndexRequest nodeId pos =
+    E.object
+        [ ( "nodeId", NodeId.encode nodeId )
+        , ( "mousePosition"
+          , E.object
+                [ ( "x", E.float pos.x )
+                , ( "y", E.float pos.y )
+                ]
+          )
+        ]
 
 
 
@@ -436,8 +459,22 @@ nodeElement :
     -> List (S.Attribute Msg)
     -> S.Svg Msg
 nodeElement model node groupAttrs nodeAttrs =
+    let
+        withPossibleClickEventListener attrs =
+            if node.content.isBeingEdited then
+                groupAttrs
+                    ++ [ SE.on "click"
+                            (D.map
+                                (DetermineNodeContentCursorIndex node.id)
+                                decodeMouseEvent
+                            )
+                       ]
+
+            else
+                groupAttrs
+    in
     S.g
-        (groupAttrs
+        (withPossibleClickEventListener groupAttrs
             ++ [ SA.transform
                     ("translate("
                         ++ String.fromFloat node.pos.x
@@ -457,9 +494,9 @@ nodeElement model node groupAttrs nodeAttrs =
 
 
 nodeForeground : Node -> List (S.Attribute Msg) -> S.Svg Msg
-nodeForeground node attrs =
+nodeForeground node attributes =
     let
-        attrsWithPossibleStrokeWidth =
+        withPossibleStrokeWidth attrs =
             if node.isSelected then
                 attrs ++ [ SA.strokeWidth "2px" ]
 
@@ -475,7 +512,7 @@ nodeForeground node attrs =
     in
     roundedRect node.dims
         5
-        (attrsWithPossibleStrokeWidth ++ [ SA.cursor cursor ])
+        (withPossibleStrokeWidth ([ SA.cursor cursor ] ++ attributes))
 
 
 nodeContentView : Model -> NodeContent.Model -> List (S.Attribute Msg) -> S.Svg NodeContent.Msg

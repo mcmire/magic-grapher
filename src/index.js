@@ -3,10 +3,13 @@ import "./index.css";
 import { Elm } from "./Main.elm";
 
 class GraphNode {
-  constructor(nodeId, element) {
+  constructor(root, nodeId, element) {
+    this.root = root;
     this.nodeId = nodeId;
     this.element = element;
     this.editorText = new GraphNodeEditorText(
+      root,
+      nodeId,
       element.querySelector('[data-id="editor-text"]')
     );
 
@@ -21,13 +24,19 @@ class GraphNode {
     this.editorText.fireKeyEvent(originalEvent);
   }
 
+  determineEditorCursorIndex(mousePosition) {
+    this.editorText.determineCursorIndex(mousePosition);
+  }
+
   calculateEditorMetrics(request) {
     this.editorText.calculateMetrics(request);
   }
 }
 
 class GraphNodeEditorText {
-  constructor(element) {
+  constructor(root, nodeId, element) {
+    this.root = root;
+    this.nodeId = nodeId;
     this.element = element;
   }
 
@@ -41,6 +50,37 @@ class GraphNodeEditorText {
     console.log("[JS] dispatching key event");
     const event = new CustomEvent("key", { detail: originalEvent });
     this.element.dispatchEvent(event);
+  }
+
+  determineCursorIndex(mousePosition) {
+    const absoluteBbox = this.element.getBoundingClientRect();
+    const relativeBbox = this.element.getBBox();
+    const center = {
+      x: absoluteBbox.x - relativeBbox.x,
+      y: absoluteBbox.y - relativeBbox.y
+    };
+
+    const normalizedMousePosition = this._normalizePosition(
+      mousePosition,
+      absoluteBbox
+    );
+    const relativizedNormalizedMousePosition = this._relativizePosition(
+      normalizedMousePosition,
+      center
+    );
+
+    console.log(
+      "normalizing mouse position to",
+      relativizedNormalizedMousePosition.x,
+      relativizedNormalizedMousePosition.y
+    );
+
+    const point = this.root.createSVGPoint();
+    point.x = relativizedNormalizedMousePosition.x;
+    point.y = relativizedNormalizedMousePosition.y;
+    const cursorIndex = this.element.getCharNumAtPosition(point);
+
+    this.calculateMetrics({ cursorIndex, text: this.element.textContent });
   }
 
   calculateMetrics(request) {
@@ -66,7 +106,7 @@ class GraphNodeEditorText {
     });
 
     const detail = {
-      nodeId: parseInt(request.nodeId, 10),
+      nodeId: parseInt(this.nodeId, 10),
       width: bbox.width,
       height: bbox.height,
       cursorPosition: cursorPosition,
@@ -77,6 +117,35 @@ class GraphNodeEditorText {
     // TODO: Convert this to a port?
     const event = new CustomEvent("metricsRecalculated", { detail });
     this.element.dispatchEvent(event);
+  }
+
+  _normalizePosition(position, bbox) {
+    const normalizedPosition = {};
+
+    if (position.x > bbox.right) {
+      normalizedPosition.x = bbox.right;
+    } else if (position.x < bbox.left) {
+      normalizedPosition.x = bbox.left;
+    } else {
+      normalizedPosition.x = position.x;
+    }
+
+    if (position.y < bbox.top) {
+      normalizedPosition.y = bbox.top;
+    } else if (position.y > bbox.bottom) {
+      normalizedPosition.y = bbox.bottom;
+    } else {
+      normalizedPosition.y = position.y;
+    }
+
+    return normalizedPosition;
+  }
+
+  _relativizePosition(position, bbox) {
+    return {
+      x: position.x - bbox.x,
+      y: position.y - bbox.y
+    };
   }
 
   _normalizeTextForSvgElement(text) {
@@ -97,9 +166,8 @@ class GraphNodeEditorText {
 
   _determineCursorPosition({ cursorIndex, text, bbox }) {
     // cursorIndex can either refer to the start of a character or the end of a
-    // character. Usually it refers to the position before a character (so -1 is
-    // a valid index) but if it's the last index in the string then it refers to
-    // the position after the character.
+    // character. Usually it refers to the position after a character, but if
+    // it's 0, then it refers to the position before the character.
     //
     // See this for more on getStartPositionOfChar and getEndPositionOfChar:
     //
@@ -121,6 +189,16 @@ class GraphNodeEditorText {
 
     return cursorPosition;
   }
+}
+
+function findGraphNodeBy(id) {
+  const graphNode = graphNodes[id];
+
+  if (graphNode == null) {
+    throw new Error(`Can't find graph node with node id: ${id}`);
+  }
+
+  return graphNode;
 }
 
 function isGraphNodeElement(node) {
@@ -200,7 +278,11 @@ const svgTextElementAddedObserver = new MutationObserver(mutations => {
 
         if (isGraphNodeElement(node)) {
           console.log(`[JS] adding graph node: ${node.dataset.nodeId}`);
-          const graphNode = new GraphNode(node.dataset.nodeId, node);
+          const graphNode = new GraphNode(
+            svgElement,
+            node.dataset.nodeId,
+            node
+          );
           graphNodes[node.dataset.nodeId] = graphNode;
           graphNode.fireEditorInitEvent();
         }
@@ -212,20 +294,6 @@ const svgTextElementAddedObserver = new MutationObserver(mutations => {
 svgTextElementAddedObserver.observe(svgElement, {
   childList: true,
   subtree: true
-});
-
-app.ports.calculateNodeContentMetrics.subscribe(change => {
-  console.log("[JS] receiving request to calculateNodeContentMetrics", change);
-
-  const graphNode = graphNodes[change.nodeId];
-
-  if (graphNode == null) {
-    throw new Error(
-      `[calculateNodeContentMetrics] Can't find graph node with node id: ${change.nodeId}`
-    );
-  }
-
-  graphNode.calculateEditorMetrics(change);
 });
 
 app.ports.startListeningForNodeEditorKeyEvent.subscribe(nodeId => {
@@ -269,4 +337,25 @@ app.ports.stopListeningForNodeEditorKeyEvent.subscribe(() => {
   document.removeEventListener("keydown", keydownEventListener);
 
   keydownEventListener = null;
+});
+
+app.ports.calculateNodeContentMetrics.subscribe(change => {
+  console.log("[JS] receiving request to calculateNodeContentMetrics", change);
+
+  const graphNode = findGraphNodeBy(change.nodeId);
+
+  graphNode.calculateEditorMetrics(change);
+});
+
+app.ports.determineNodeContentCursorIndex.subscribe(request => {
+  console.log(
+    "[JS] receiving request to determineNodeContentCursorIndex",
+    request.nodeId,
+    request.mousePosition.x,
+    request.mousePosition.y
+  );
+
+  const graphNode = findGraphNodeBy(request.nodeId);
+
+  graphNode.determineEditorCursorIndex(request.mousePosition);
 });

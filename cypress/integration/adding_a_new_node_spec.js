@@ -1,5 +1,5 @@
 describe("Adding a new node", () => {
-  const expectedY = "-8";
+  const expectedY = "-8"; // 16 / 2
 
   function getBody() {
     return cy.get("body");
@@ -203,4 +203,24 @@ describe("Adding a new node", () => {
         });
     }
   );
+
+  specify("Clicking in the middle of the text to move the cursor", () => {
+    getBody().type("tomato");
+
+    getNodeEditorTextBox()
+      .getPositions()
+      .then(positions => {
+        const x1 = positions[2].end.x;
+        const x2 = positions[3].end.x;
+        const x = x1 + (x2 - x1) * 0.3;
+
+        getNodeEditorTextBox().click(x, expectedY);
+
+        getNodeEditorCursor().should(
+          "have.position",
+          positions[2].start.x,
+          expectedY
+        );
+      });
+  });
 });

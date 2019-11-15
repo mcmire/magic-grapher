@@ -26,7 +26,7 @@ import String.Extra
 import Svg as S
 import Svg.Attributes as SA
 import Svg.Events as SE
-import Types exposing (Range)
+import Types exposing (Position, Range)
 
 
 port calculateNodeContentMetrics : E.Value -> Cmd msg
@@ -95,6 +95,7 @@ type Change
     | MoveCursorRightByWord
     | MoveCursorToBeginningOfLine
     | MoveCursorToEndOfLine
+    | PositionCursor Int
 
 
 type alias MetricsRecalculatedEvent =
@@ -173,6 +174,9 @@ update msg model =
 
                         MoveCursorToEndOfLine ->
                             moveCursorToEndOfLine
+
+                        PositionCursor ci ->
+                            \_ -> ci
 
                 cursorIndex =
                     cursorIndexFn text
@@ -348,6 +352,16 @@ encodeCalculateMetricsRequest model =
         ]
 
 
+mapToDisplayDecodeError : Msg -> Maybe D.Error
+mapToDisplayDecodeError msg =
+    case msg of
+        DisplayDecodeError error ->
+            Just error
+
+        _ ->
+            Nothing
+
+
 doNothing : Msg
 doNothing =
     DoNothing
@@ -359,14 +373,9 @@ startEditing =
     StartEditing
 
 
-mapToDisplayDecodeError : Msg -> Maybe D.Error
-mapToDisplayDecodeError msg =
-    case msg of
-        DisplayDecodeError error ->
-            Just error
-
-        _ ->
-            Nothing
+positionCursor : Int -> Msg
+positionCursor cursorIndex =
+    UpdateEditor (PositionCursor cursorIndex)
 
 
 
