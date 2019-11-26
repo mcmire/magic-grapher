@@ -10,4 +10,4 @@ type alias Dimensions =
 
 
 type alias Range =
-    { start : Int, end : Int }
+    { start : Float, end : Float }

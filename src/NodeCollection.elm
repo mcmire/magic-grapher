@@ -1,5 +1,6 @@
 module NodeCollection exposing
     ( NodeCollection
+    , anyBeingEdited
     , empty
     , get
     , insert
@@ -56,18 +57,7 @@ update : NodeId -> (Node -> Node) -> NodeCollection -> NodeCollection
 update nodeId fn coll =
     let
         newEntries =
-            Dict.update
-                nodeId
-                -- TODO: There's probably a better way to do this
-                (\maybeNode ->
-                    case maybeNode of
-                        Just node ->
-                            Just (fn node)
-
-                        Nothing ->
-                            Nothing
-                )
-                coll.entries
+            Dict.update nodeId (Maybe.map fn) coll.entries
     in
     { coll | entries = newEntries }
 
@@ -84,3 +74,8 @@ updateNodeContentFor nodeId fn coll =
 values : NodeCollection -> List Node
 values coll =
     Dict.values coll.entries
+
+
+anyBeingEdited : NodeCollection -> Bool
+anyBeingEdited coll =
+    List.any (\node -> node.content.isBeingEdited) (values coll)

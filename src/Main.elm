@@ -1,4 +1,4 @@
-port module Main exposing (main)
+module Main exposing (main)
 
 import Browser
 import Browser.Dom as Dom exposing (Viewport)
@@ -29,9 +29,6 @@ import Task
 import Tuple
 import Types exposing (Dimensions, Position, Range)
 import VirtualDom as V
-
-
-port determineNodeContentCursorIndex : E.Value -> Cmd msg
 
 
 main =
@@ -71,6 +68,7 @@ type alias Model =
     , mouse : { pos : Maybe Position, cursor : String }
     , debouncer : Debouncer Msg
     , nodes : NodeCollection
+    , nodeContainingMouseDown : Maybe NodeId
     , errorMessages : List String
     }
 
@@ -82,6 +80,7 @@ init _ =
       , mouse = { pos = Nothing, cursor = "normal" }
       , debouncer = Debouncer.toDebouncer (Debouncer.throttle 250)
       , nodes = NodeCollection.empty
+      , nodeContainingMouseDown = Nothing
       , errorMessages = []
       }
     , Task.perform AdjustViewboxFromInitial Dom.getViewport
@@ -96,10 +95,11 @@ type Msg
     = AdjustViewboxFromInitial Viewport
     | AdjustViewboxFromResize Int Int
     | DebounceMsg (Debouncer.Msg Msg)
-    | DetermineNodeContentCursorIndex NodeId Position
     | DisplayCouldNotFindNodeError NodeId
     | DisplayDecodeError D.Error
     | DoNothing
+    | MouseDownInNodeContent NodeId Position
+    | MouseUp
     | PlaceNodeAt Position
     | ReturnToWaitingForFirstAction
     | UpdateNodeContent NodeId NodeContent.Msg
@@ -133,12 +133,6 @@ update msg model =
         DebounceMsg subMsg ->
             Debouncer.update update updateDebouncer subMsg model
 
-        DetermineNodeContentCursorIndex nodeId pos ->
-            ( model
-            , determineNodeContentCursorIndex
-                (encodeDetermineNodeContentCursorIndexRequest nodeId pos)
-            )
-
         DisplayCouldNotFindNodeError nodeId ->
             ( { model
                 | errorMessages =
@@ -155,6 +149,19 @@ update msg model =
 
         DoNothing ->
             ( model, Cmd.none )
+
+        MouseDownInNodeContent nodeId pos ->
+            update
+                (UpdateNodeContent nodeId (NodeContent.updateCursorPositionFromMouse pos))
+                { model | nodeContainingMouseDown = Just nodeId }
+
+        MouseUp ->
+            let
+                _ =
+                    Debug.log "Mouse UP!"
+            in
+            -- TODO: End the selection
+            ( { model | nodeContainingMouseDown = Nothing }, Cmd.none )
 
         PlaceNodeAt pos ->
             let
@@ -216,19 +223,6 @@ update msg model =
             ( { model | state = WaitingForNodeToBePlaced }
             , Cmd.none
             )
-
-
-encodeDetermineNodeContentCursorIndexRequest : NodeId -> Position -> E.Value
-encodeDetermineNodeContentCursorIndexRequest nodeId pos =
-    E.object
-        [ ( "nodeId", NodeId.encode nodeId )
-        , ( "mousePosition"
-          , E.object
-                [ ( "x", E.float pos.x )
-                , ( "y", E.float pos.y )
-                ]
-          )
-        ]
 
 
 
@@ -321,14 +315,19 @@ view : Model -> H.Html Msg
 view model =
     H.div
         [ HA.attribute "data-id" "root" ]
-        (withErrorsContainer model (mainChildren model))
+        (mainChildren model)
 
 
 mainChildren : Model -> List (H.Html Msg)
 mainChildren model =
     [ H.div
-        [ HA.class "debug" ]
-        [ H.text ("State: " ++ describeModelState model) ]
+        [ HA.class "info-overlay" ]
+        (withErrorsContainer model
+            [ H.div
+                [ HA.class "debug" ]
+                [ H.text ("State: " ++ describeModelState model) ]
+            ]
+        )
     , SK.node "svg"
         (svgAttributes model)
         (nodeElementToBePlaced model ++ placedNodeElements model)
@@ -349,10 +348,9 @@ withErrorsContainer model elements =
                         [ H.text "Errors" ]
                     , H.div
                         [ HA.class "errors__body" ]
-                        (List.map
-                            (\message -> H.p [] [ H.text message ])
-                            model.errorMessages
-                        )
+                        [ H.pre []
+                            [ H.text (String.join "\n" model.errorMessages) ]
+                        ]
                     ]
                ]
 
@@ -360,7 +358,9 @@ withErrorsContainer model elements =
 svgAttributes : Model -> List (S.Attribute Msg)
 svgAttributes model =
     constantSvgAttributes model
+        ++ svgAttributesWhileNoNodeIsBeingEdited model
         ++ svgAttributesWhileWaitingForNodeToBePlaced model
+        ++ svgAttributesWhileMouseIsDownWithinNodeContent model
 
 
 constantSvgAttributes : Model -> List (S.Attribute Msg)
@@ -372,11 +372,6 @@ constantSvgAttributes model =
             [ 0, 0, floor model.viewbox.width, floor model.viewbox.height ]
         )
     , SA.preserveAspectRatio "none"
-    , SE.on "mousemove"
-        (D.map
-            (debouncedVersionOf TrackMouseMovementAt)
-            decodeMouseEvent
-        )
     ]
 
 
@@ -386,14 +381,37 @@ debouncedVersionOf wrapInMsg a =
     wrapInMsg a
 
 
+svgAttributesWhileNoNodeIsBeingEdited : Model -> List (S.Attribute Msg)
+svgAttributesWhileNoNodeIsBeingEdited model =
+    if NodeCollection.anyBeingEdited model.nodes then
+        []
+
+    else
+        [ SE.on "mousemove"
+            (D.map
+                (debouncedVersionOf TrackMouseMovementAt)
+                decodeMouseEvent
+            )
+        ]
+
+
 svgAttributesWhileWaitingForNodeToBePlaced : Model -> List (S.Attribute Msg)
 svgAttributesWhileWaitingForNodeToBePlaced model =
     case model.state of
         WaitingForNodeToBePlaced ->
-            [ SE.on "click" (D.map PlaceNodeAt decodeMouseEvent)
-            ]
+            [ SE.on "mousedown" (D.map PlaceNodeAt decodeMouseEvent) ]
 
         _ ->
+            []
+
+
+svgAttributesWhileMouseIsDownWithinNodeContent : Model -> List (S.Attribute Msg)
+svgAttributesWhileMouseIsDownWithinNodeContent model =
+    case model.nodeContainingMouseDown of
+        Just _ ->
+            [ SE.on "mouseup" (D.succeed MouseUp) ]
+
+        Nothing ->
             []
 
 
@@ -432,7 +450,7 @@ placedNodeElement model node =
         model
         node
         [ HA.attribute "data-id" "graph-node"
-        , HA.attribute "data-node-id" (String.fromInt node.id)
+        , HA.attribute "data-graph-node-id" (String.fromInt node.id)
         ]
         [ SA.stroke (colorToCssHsla nodeBorderColor)
         , SA.fill (colorToCssHsla unselectedNodeFillColor)
@@ -460,21 +478,47 @@ nodeElement :
     -> S.Svg Msg
 nodeElement model node groupAttrs nodeAttrs =
     let
-        withPossibleClickEventListener attrs =
+        withPossibleOnMouseDown attrs =
             if node.content.isBeingEdited then
-                groupAttrs
-                    ++ [ SE.on "click"
-                            (D.map
-                                (DetermineNodeContentCursorIndex node.id)
+                attrs
+                    ++ [ SE.on "mousedown"
+                            (D.map (MouseDownInNodeContent node.id)
                                 decodeMouseEvent
                             )
                        ]
 
             else
-                groupAttrs
+                attrs
+
+        isMouseDownInContentFor nodeId =
+            model.nodeContainingMouseDown == Just nodeId
+
+        {-
+           withPossibleOnMouseMove attrs =
+               if isMouseDownInContentFor node.id then
+                   case node.content.userLocation of
+                       Just userLocation ->
+                           attrs
+                               ++ [ SE.on "mousemove"
+                                       (D.map
+                                           (UpdateNodeContent node.id)
+                                           (D.map
+                                               NodeContent.updateSelectionFromMouse
+                                               decodeMouseEvent
+                                           )
+                                       )
+                                  ]
+
+                       Nothing ->
+                           attrs
+
+               else
+                   attrs
+        -}
     in
     S.g
-        (withPossibleClickEventListener groupAttrs
+        (withPossibleOnMouseDown groupAttrs
+            --++ withPossibleOnMouseMove groupAttrs
             ++ [ SA.transform
                     ("translate("
                         ++ String.fromFloat node.pos.x
