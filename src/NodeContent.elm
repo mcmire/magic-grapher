@@ -1,12 +1,16 @@
 port module NodeContent exposing
     ( Model
     , Msg
-    , doNothing
+    ,  doNothing
+       --, endSelection
+
     , init
     , mapToDisplayDecodeError
     , startEditing
     , subscriptions
     , update
+    , updateCursorPositionFromMouse
+    , updateSelectionFromMouse
     , view
     )
 
@@ -29,7 +33,7 @@ import Svg.Events as SE
 import Types exposing (Position, Range)
 
 
-port calculateNodeContentMetrics : E.Value -> Cmd msg
+port calculateGraphNodeContentMetrics : E.Value -> Cmd msg
 
 
 port startListeningForNodeEditorKeyEvent : NodeId -> Cmd msg
@@ -41,8 +45,24 @@ port stopListeningForNodeEditorKeyEvent : () -> Cmd msg
 port receiveNodeEditorKeyEvent : (E.Value -> msg) -> Sub msg
 
 
+port updateGraphNodeEditorSelection : E.Value -> Cmd msg
+
+
 
 -- MODEL
+
+
+type alias SelectionPosition =
+    { index : Int, position : Float }
+
+
+type alias SelectionRange =
+    { start : SelectionPosition, end : SelectionPosition }
+
+
+type UserLocation
+    = Cursor SelectionPosition
+    | Selection SelectionRange
 
 
 type alias Model =
@@ -52,8 +72,7 @@ type alias Model =
     , height : Float
     , fontSize : Float
     , isBeingEdited : Bool
-    , cursorIndex : Int
-    , cursorPosition : Float
+    , userLocation : Maybe UserLocation
     }
 
 
@@ -73,12 +92,7 @@ init nodeId =
     , height = 0
     , fontSize = 16.0
     , isBeingEdited = False
-
-    -- TODO: Nothing?
-    , cursorIndex = 0
-
-    -- TODO: Nothing?
-    , cursorPosition = 0.0
+    , userLocation = Nothing
     }
 
 
@@ -95,14 +109,23 @@ type Change
     | MoveCursorRightByWord
     | MoveCursorToBeginningOfLine
     | MoveCursorToEndOfLine
-    | PositionCursor Int
+
+
+type QueuedSelectionUpdate
+    = UpdateCursorPositionFromMouse Position
+    | UpdateCursorPositionFromIndex Int
+    | UpdateSelectionFromMouse Position
+
+
+
+--| EndSelection
 
 
 type alias MetricsRecalculatedEvent =
     { nodeId : NodeId
     , width : Float
     , height : Float
-    , cursorPosition : Float
+    , userLocation : UserLocation
     , text : String
     }
 
@@ -114,13 +137,17 @@ type Msg
     | StartEditing
     | StopEditing
     | UpdateEditor Change
+    | QueueSelectionUpdate QueuedSelectionUpdate
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         StartEditing ->
-            ( { model | isBeingEdited = True }
+            ( { model
+                | isBeingEdited = True
+                , userLocation = Just (Cursor { index = 0, position = 0 })
+              }
             , startListeningForNodeEditorKeyEvent model.nodeId
             )
 
@@ -129,78 +156,179 @@ update msg model =
             , stopListeningForNodeEditorKeyEvent ()
             )
 
-        UpdateEditor change ->
-            let
-                text =
-                    case change of
-                        InsertCharacter char ->
-                            String.Extra.insertAt
-                                char
-                                model.cursorIndex
-                                model.text
+        {-
+           MouseDown pos ->
+               ( { model | isMouseDown = True },
+               updateGraphNodeEditorSelection
+                   (encodeUpdateGraphNodeEditorSelectionRequest
+                       model.nodeId
+                       (UpdateCursorPositionFromMouse pos)
+                   )
+                )
 
-                        RemovePreviousCharacter ->
-                            String.slice 0 (model.cursorIndex - 1) model.text
-                                ++ String.slice
-                                    model.cursorIndex
-                                    (String.length model.text)
+           MouseUp ->
+        -}
+        QueueSelectionUpdate selectionUpdate ->
+            ( model
+            , updateGraphNodeEditorSelection
+                (encodeUpdateGraphNodeEditorSelectionRequest
+                    model
+                    model.nodeId
+                    selectionUpdate
+                )
+            )
+
+        -- This is just responsible for key events right now -- no mouse events
+        UpdateEditor change ->
+            case model.userLocation of
+                Just (Cursor cursor) ->
+                    let
+                        text =
+                            case change of
+                                InsertCharacter char ->
+                                    String.Extra.insertAt char cursor.index model.text
+
+                                RemovePreviousCharacter ->
+                                    String.slice 0 (cursor.index - 1) model.text
+                                        ++ String.slice cursor.index (String.length model.text) model.text
+
+                                _ ->
                                     model.text
 
-                        _ ->
-                            model.text
+                        newCursorIndex =
+                            case change of
+                                InsertCharacter char ->
+                                    moveCursorRightByChar cursor.index text
 
-                cursorIndexFn =
-                    case change of
-                        InsertCharacter char ->
-                            moveCursorRightByChar model.cursorIndex
+                                RemovePreviousCharacter ->
+                                    moveCursorLeftByChar cursor.index text
 
-                        RemovePreviousCharacter ->
-                            moveCursorLeftByChar model.cursorIndex
+                                MoveCursorLeftByChar ->
+                                    moveCursorLeftByChar cursor.index text
 
-                        MoveCursorLeftByChar ->
-                            moveCursorLeftByChar model.cursorIndex
+                                MoveCursorLeftByWord ->
+                                    moveCursorLeftByWord cursor.index text
 
-                        MoveCursorLeftByWord ->
-                            moveCursorLeftByWord model.cursorIndex
+                                MoveCursorRightByChar ->
+                                    moveCursorRightByChar cursor.index text
 
-                        MoveCursorRightByChar ->
-                            moveCursorRightByChar model.cursorIndex
+                                MoveCursorRightByWord ->
+                                    moveCursorRightByWord cursor.index text
 
-                        MoveCursorRightByWord ->
-                            moveCursorRightByWord model.cursorIndex
+                                MoveCursorToBeginningOfLine ->
+                                    moveCursorToBeginningOfLine text
 
-                        MoveCursorToBeginningOfLine ->
-                            moveCursorToBeginningOfLine
+                                MoveCursorToEndOfLine ->
+                                    moveCursorToEndOfLine text
 
-                        MoveCursorToEndOfLine ->
-                            moveCursorToEndOfLine
+                        selectionUpdate =
+                            UpdateCursorPositionFromIndex newCursorIndex
 
-                        PositionCursor ci ->
-                            \_ -> ci
+                        cmd =
+                            updateGraphNodeEditorSelection
+                                (encodeUpdateGraphNodeEditorSelectionRequest
+                                    model
+                                    model.nodeId
+                                    selectionUpdate
+                                )
+                    in
+                    ( { model | text = text }, cmd )
 
-                cursorIndex =
-                    cursorIndexFn text
+                Just (Selection _) ->
+                    ( model, Cmd.none )
 
-                newModel =
-                    { model | text = text, cursorIndex = cursorIndex }
-
-                cmd =
-                    calculateNodeContentMetrics
-                        (encodeCalculateMetricsRequest newModel)
-            in
-            ( newModel, cmd )
+                Nothing ->
+                    ( model, Cmd.none )
 
         ReceiveRecalculatedMetrics event ->
             ( { model
                 | width = event.width
                 , height = event.height
-                , cursorPosition = event.cursorPosition
+                , userLocation = Just event.userLocation
               }
             , Cmd.none
             )
 
         _ ->
             ( model, Cmd.none )
+
+
+encodeUpdateGraphNodeEditorSelectionRequest : Model -> NodeId -> QueuedSelectionUpdate -> E.Value
+encodeUpdateGraphNodeEditorSelectionRequest model nodeId selectionUpdate =
+    let
+        attrsWithPossibleMousePosition attrs =
+            case selectionUpdate of
+                UpdateCursorPositionFromMouse pos ->
+                    attrs
+                        ++ [ ( "type"
+                             , E.string "UpdateCursorPositionFromMouse"
+                             )
+                           , ( "at"
+                             , E.object
+                                [ ( "x", E.float pos.x )
+                                , ( "y", E.float pos.y )
+                                ]
+                             )
+                           ]
+
+                UpdateCursorPositionFromIndex index ->
+                    attrs
+                        ++ [ ( "type"
+                             , E.string "UpdateCursorPositionFromIndex"
+                             )
+                           , ( "at"
+                             , E.int index
+                             )
+                           ]
+
+                UpdateSelectionFromMouse newPos ->
+                    case model.userLocation of
+                        Just userLocation ->
+                            attrs
+                                ++ [ ( "type", E.string "UpdateSelection" )
+                                   , ( "from", encodeUserLocation userLocation )
+                                   , ( "to"
+                                     , E.object
+                                        [ ( "x", E.float newPos.x )
+                                        , ( "y", E.float newPos.y )
+                                        ]
+                                     )
+                                   ]
+
+                        Nothing ->
+                            attrs
+
+        --EndSelection ->
+        --attrs ++ [ ( "type", E.string "EndSelection" ) ]
+    in
+    E.object
+        (attrsWithPossibleMousePosition
+            [ ( "graphNodeId", NodeId.encode nodeId ) ]
+        )
+
+
+encodeUserLocation : UserLocation -> E.Value
+encodeUserLocation userLocation =
+    case userLocation of
+        Selection range ->
+            E.object
+                [ ( "start"
+                  , E.object
+                        [ ( "index", E.int range.start.index )
+                        , ( "position", E.float range.start.position )
+                        ]
+                  )
+                , ( "end"
+                  , E.object
+                        [ ( "index", E.int range.end.index )
+                        , ( "position", E.float range.end.position )
+                        ]
+                  )
+                ]
+
+        Cursor pos ->
+            -- This really shouldn't happen
+            E.null
 
 
 moveCursorLeftByChar : Int -> String -> Int
@@ -343,13 +471,16 @@ findWordsIn text =
         matches
 
 
-encodeCalculateMetricsRequest : Model -> E.Value
-encodeCalculateMetricsRequest model =
-    E.object
-        [ ( "nodeId", NodeId.encode model.nodeId )
-        , ( "cursorIndex", E.int model.cursorIndex )
-        , ( "text", E.string model.text )
-        ]
+
+{-
+   encodeCalculateGraphNodeContentMetricsRequest : NodeId -> Int -> E.Value
+   encodeCalculateGraphNodeContentMetricsRequest nodeId cursorIndex =
+       E.object
+           [ ( "graphNodeId", NodeId.encode nodeId )
+           , ( "cursorSelectionAsIndices", E.int cursorIndex )
+           , ( "text", E.string model.text )
+           ]
+-}
 
 
 mapToDisplayDecodeError : Msg -> Maybe D.Error
@@ -373,12 +504,22 @@ startEditing =
     StartEditing
 
 
-positionCursor : Int -> Msg
-positionCursor cursorIndex =
-    UpdateEditor (PositionCursor cursorIndex)
+updateCursorPositionFromMouse : Position -> Msg
+updateCursorPositionFromMouse pos =
+    QueueSelectionUpdate (UpdateCursorPositionFromMouse pos)
+
+
+updateSelectionFromMouse : Position -> Msg
+updateSelectionFromMouse pos =
+    QueueSelectionUpdate (UpdateSelectionFromMouse pos)
 
 
 
+{-
+   endSelection : Msg
+   endSelection =
+       QueueSelectionUpdate EndSelection
+-}
 -- VIEW
 
 
@@ -404,8 +545,8 @@ textView model attrs =
                , SA.dominantBaseline "central"
                , SA.textAnchor "middle"
                , SA.fontSize (String.fromFloat model.fontSize ++ "px")
-               , HA.attribute "data-id" "editor-text"
-               , HA.attribute "data-node-id" (String.fromInt model.nodeId)
+               , HA.attribute "data-id" "graph-node-editor"
+               , HA.attribute "data-graph-node-id" (String.fromInt model.nodeId)
                , HA.attribute "data-width"
                     (String.fromFloat model.width)
                , HA.attribute "data-height"
@@ -435,10 +576,34 @@ decodeMetricsRecalculatedEvent =
     D.field "detail"
         (D.map5
             MetricsRecalculatedEvent
-            (D.field "nodeId" NodeId.decode)
+            (D.field "graphNodeId" NodeId.decode)
             (D.field "width" D.float)
             (D.field "height" D.float)
-            (D.field "cursorPosition" D.float)
+            (D.field "userLocation"
+                (D.oneOf
+                    [ D.map Cursor
+                        (D.map2 SelectionPosition
+                            (D.field "index" D.int)
+                            (D.field "position" D.float)
+                        )
+                    , D.map Selection
+                        (D.map2 SelectionRange
+                            (D.field "start"
+                                (D.map2 SelectionPosition
+                                    (D.field "index" D.int)
+                                    (D.field "position" D.float)
+                                )
+                            )
+                            (D.field "end"
+                                (D.map2 SelectionPosition
+                                    (D.field "index" D.int)
+                                    (D.field "position" D.float)
+                                )
+                            )
+                        )
+                    ]
+                )
+            )
             (D.field "text" D.string)
         )
 
@@ -467,22 +632,30 @@ normalizeTextForSvgElement text =
 cursorView : Model -> List (S.Attribute msg) -> List (S.Svg msg)
 cursorView model attrs =
     if model.isBeingEdited then
-        let
-            -- TODO: Use
-            nodePadding =
-                10.0
-        in
-        [ S.rect
-            [ SA.x (String.fromFloat model.cursorPosition)
-            , SA.y (String.fromFloat (-model.fontSize / 2))
-            , SA.width "2"
-            , SA.height (String.fromFloat model.fontSize)
-            , SA.shapeRendering "crispEdges"
-            , SA.class "blink"
-            , HA.attribute "data-testid" "cursor"
-            ]
-            []
-        ]
+        case model.userLocation of
+            Just (Cursor cursor) ->
+                let
+                    -- TODO: Use
+                    nodePadding =
+                        10.0
+                in
+                [ S.rect
+                    [ SA.x (String.fromFloat cursor.position)
+                    , SA.y (String.fromFloat (-model.fontSize / 2))
+                    , SA.width "2"
+                    , SA.height (String.fromFloat model.fontSize)
+                    , SA.shapeRendering "crispEdges"
+                    , SA.class "blink"
+                    , HA.attribute "data-testid" "cursor"
+                    ]
+                    []
+                ]
+
+            Just (Selection _) ->
+                []
+
+            Nothing ->
+                []
 
     else
         []

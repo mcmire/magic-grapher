@@ -2,45 +2,16 @@ import "./index.css";
 
 import { Elm } from "./Main.elm";
 
-class GraphNode {
-  constructor(root, nodeId, element) {
+// TODO: Convert to TypeScript
+
+class GraphNodeEditor {
+  constructor(root, graphNodeId, element) {
     this.root = root;
-    this.nodeId = nodeId;
-    this.element = element;
-    this.editorText = new GraphNodeEditorText(
-      root,
-      nodeId,
-      element.querySelector('[data-id="editor-text"]')
-    );
-
-    console.log("[JS] graph node initialized!");
-  }
-
-  fireEditorInitEvent() {
-    this.editorText.fireInitEvent();
-  }
-
-  fireEditorKeyEvent(originalEvent) {
-    this.editorText.fireKeyEvent(originalEvent);
-  }
-
-  determineEditorCursorIndex(mousePosition) {
-    this.editorText.determineCursorIndex(mousePosition);
-  }
-
-  calculateEditorMetrics(request) {
-    this.editorText.calculateMetrics(request);
-  }
-}
-
-class GraphNodeEditorText {
-  constructor(root, nodeId, element) {
-    this.root = root;
-    this.nodeId = nodeId;
+    this.graphNodeId = graphNodeId;
     this.element = element;
   }
 
-  fireInitEvent(originalEvent) {
+  fireInitEvent() {
     console.log("[JS] dispatching init event");
     const event = new CustomEvent("init");
     this.element.dispatchEvent(event);
@@ -52,7 +23,111 @@ class GraphNodeEditorText {
     this.element.dispatchEvent(event);
   }
 
-  determineCursorIndex(mousePosition) {
+  updateCursorPositionFromMouse(mousePosition) {
+    const cursorIndex = this._findCursorIndexAt(mousePosition);
+    this.calculateMetrics({
+      text: this.element.textContent,
+      cursor: cursorIndex
+    });
+  }
+
+  updateCursorPositionFromIndex(cursorIndex) {
+    this.calculateMetrics({
+      text: this.element.textContent,
+      cursor: cursorIndex
+    });
+  }
+
+  updateSelectionFromMouse(fromCursorIndex, toMousePosition) {
+    const toCursorIndex = this._findCursorIndexAt(toMousePosition);
+    this.calculateMetrics({
+      text: this.element.textContent,
+      selection: { start: fromCursorIndex, end: toCursorIndex }
+    });
+  }
+
+  // request
+  // = { text : String, cursor : Int }
+  // | { text : String, selection : { start : Int, end : Int } }
+  calculateMetrics({ text, cursor, selection }) {
+    console.log("[JS] calculating metrics!", text, cursor, selection);
+
+    // Update the text node inside of the <text> element
+    // Don't use innerHTML or else it replaces the text node and Elm will get
+    //   very confused!
+    this.element.childNodes[0].nodeValue = this._normalizeTextForSvgElement(
+      text
+    );
+    const bbox = this.element.getBBox();
+
+    let userLocation;
+
+    // TODO: Don't we already have the position? Why do we have to recalculate
+    // this?
+    if (selection != null) {
+      const normalizedStartIndex = this._normalizeCursorIndex({
+        cursorIndex: selection.start,
+        text: text
+      });
+
+      const startPosition = this._determineCursorPosition({
+        cursorIndex: normalizedStartIndex,
+        text: text,
+        bbox: bbox
+      });
+
+      const normalizedEndIndex = this._normalizeCursorIndex({
+        cursorIndex: selection.end,
+        text: text
+      });
+
+      const endPosition = this._determineCursorPosition({
+        cursorIndex: normalizedEndIndex,
+        text: text,
+        bbox: bbox
+      });
+
+      userLocation = {
+        start: { index: normalizedStartIndex, position: startPosition },
+        end: { index: normalizedEndIndex, position: endPosition }
+      };
+    } else if (cursor != null) {
+      const normalizedIndex = this._normalizeCursorIndex({
+        cursorIndex: cursor,
+        text: text
+      });
+
+      const position = this._determineCursorPosition({
+        cursorIndex: normalizedIndex,
+        text: text,
+        bbox: bbox
+      });
+
+      userLocation = {
+        index: normalizedIndex,
+        position: position
+      };
+    } else {
+      throw new Error(
+        "Invalid request. Must match { text, cursor } or { text, selection }."
+      );
+    }
+
+    const detail = {
+      graphNodeId: parseInt(this.graphNodeId, 10),
+      width: bbox.width,
+      height: bbox.height,
+      userLocation: userLocation,
+      text: text
+    };
+
+    console.log("[JS] dispatching metricsRecalculated", detail);
+    // TODO: Convert this to a port?
+    const event = new CustomEvent("metricsRecalculated", { detail });
+    this.element.dispatchEvent(event);
+  }
+
+  _findCursorIndexAt(mousePosition) {
     const absoluteBbox = this.element.getBoundingClientRect();
     const relativeBbox = this.element.getBBox();
     const center = {
@@ -78,45 +153,8 @@ class GraphNodeEditorText {
     const point = this.root.createSVGPoint();
     point.x = relativizedNormalizedMousePosition.x;
     point.y = relativizedNormalizedMousePosition.y;
-    const cursorIndex = this.element.getCharNumAtPosition(point);
 
-    this.calculateMetrics({ cursorIndex, text: this.element.textContent });
-  }
-
-  calculateMetrics(request) {
-    const { text } = request;
-    console.log("[JS] calculating metrics!", request);
-
-    // Update the text node inside of the <text> element
-    // Don't use innerHTML or else it replaces the text node and Elm will get
-    //   very confused!
-    this.element.childNodes[0].nodeValue = this._normalizeTextForSvgElement(
-      text
-    );
-    const bbox = this.element.getBBox();
-
-    const cursorIndex = this._normalizeCursorIndex({
-      cursorIndex: request.cursorIndex,
-      text
-    });
-    const cursorPosition = this._determineCursorPosition({
-      cursorIndex,
-      text,
-      bbox
-    });
-
-    const detail = {
-      nodeId: parseInt(this.nodeId, 10),
-      width: bbox.width,
-      height: bbox.height,
-      cursorPosition: cursorPosition,
-      text: request.text
-    };
-
-    console.log("[JS] dispatching metricsRecalculated", detail);
-    // TODO: Convert this to a port?
-    const event = new CustomEvent("metricsRecalculated", { detail });
-    this.element.dispatchEvent(event);
+    return this.element.getCharNumAtPosition(point);
   }
 
   _normalizePosition(position, bbox) {
@@ -191,29 +229,21 @@ class GraphNodeEditorText {
   }
 }
 
-function findGraphNodeBy(id) {
-  const graphNode = graphNodes[id];
+function findGraphNodeEditorBy(id) {
+  const graphNodeEditor = graphNodeEditors[id];
 
-  if (graphNode == null) {
+  if (graphNodeEditor == null) {
     throw new Error(`Can't find graph node with node id: ${id}`);
   }
 
-  return graphNode;
+  return graphNodeEditor;
 }
 
 function isGraphNodeElement(node) {
   return (
     node.dataset != null &&
     node.dataset.id === "graph-node" &&
-    node.dataset.nodeId != null
-  );
-}
-
-function isGraphNodeTextElement(node) {
-  return (
-    node.dataset != null &&
-    node.dataset.id === "graph-node" &&
-    node.dataset.nodeId != null
+    node.dataset.graphNodeId != null
   );
 }
 
@@ -256,7 +286,7 @@ const app = Elm.Main.init({
 
 const svgElement = document.querySelector("svg");
 
-const graphNodes = {};
+const graphNodeEditors = {};
 let numMutations = 0;
 let keydownEventListener = null;
 
@@ -268,8 +298,8 @@ const svgTextElementAddedObserver = new MutationObserver(mutations => {
     if (mutation.type === "childList") {
       mutation.removedNodes.forEach(node => {
         if (isGraphNodeElement(node)) {
-          console.log(`[JS] removing graph node: ${node.dataset.nodeId}`);
-          delete graphNodes[node.dataset.nodeId];
+          console.log(`[JS] removing graph node: ${node.dataset.graphNodeId}`);
+          delete graphNodeEditors[node.dataset.graphNodeId];
         }
       });
 
@@ -277,14 +307,16 @@ const svgTextElementAddedObserver = new MutationObserver(mutations => {
         console.log("node", node);
 
         if (isGraphNodeElement(node)) {
-          console.log(`[JS] adding graph node: ${node.dataset.nodeId}`);
-          const graphNode = new GraphNode(
-            svgElement,
-            node.dataset.nodeId,
-            node
+          console.log(
+            `[JS] adding graph node editor: ${node.dataset.graphNodeId}`
           );
-          graphNodes[node.dataset.nodeId] = graphNode;
-          graphNode.fireEditorInitEvent();
+          const graphNodeEditor = new GraphNodeEditor(
+            svgElement,
+            node.dataset.graphNodeId,
+            node.querySelector("[data-id='graph-node-editor']")
+          );
+          graphNodeEditors[node.dataset.graphNodeId] = graphNodeEditor;
+          graphNodeEditor.fireInitEvent();
         }
       });
     }
@@ -296,7 +328,7 @@ svgTextElementAddedObserver.observe(svgElement, {
   subtree: true
 });
 
-app.ports.startListeningForNodeEditorKeyEvent.subscribe(nodeId => {
+app.ports.startListeningForNodeEditorKeyEvent.subscribe(graphNodeId => {
   console.log("[JS] start listening for graph node key event");
 
   if (keydownEventListener != null) {
@@ -304,12 +336,12 @@ app.ports.startListeningForNodeEditorKeyEvent.subscribe(nodeId => {
   }
 
   keydownEventListener = event => {
-    const graphNode = graphNodes[nodeId];
+    const graphNodeEditor = graphNodeEditors[graphNodeId];
 
-    if (graphNode == null) {
+    if (graphNodeEditor == null) {
       throw new Error(
         `[startListeningForNodeEditorKeyEvent] ` +
-          `Can't find graph node with node id: ${nodeId}`
+          `Can't find graph node with node id: ${graphNodeId}`
       );
     }
 
@@ -321,7 +353,7 @@ app.ports.startListeningForNodeEditorKeyEvent.subscribe(nodeId => {
       event.preventDefault();
     }
 
-    graphNode.fireEditorKeyEvent(event);
+    graphNodeEditor.fireKeyEvent(event);
   };
 
   document.addEventListener("keydown", keydownEventListener);
@@ -339,23 +371,42 @@ app.ports.stopListeningForNodeEditorKeyEvent.subscribe(() => {
   keydownEventListener = null;
 });
 
-app.ports.calculateNodeContentMetrics.subscribe(change => {
-  console.log("[JS] receiving request to calculateNodeContentMetrics", change);
-
-  const graphNode = findGraphNodeBy(change.nodeId);
-
-  graphNode.calculateEditorMetrics(change);
-});
-
-app.ports.determineNodeContentCursorIndex.subscribe(request => {
+// TODO: Rename this to calculateNodeEditorMetrics??
+/*
+app.ports.calculateGraphNodeContentMetrics.subscribe(change => {
   console.log(
-    "[JS] receiving request to determineNodeContentCursorIndex",
-    request.nodeId,
-    request.mousePosition.x,
-    request.mousePosition.y
+    "[JS] receiving request to calculateGraphNodeContentMetrics",
+    change
   );
 
-  const graphNode = findGraphNodeBy(request.nodeId);
+  const graphNodeEditor = findGraphNodeEditorBy(change.graphNodeId);
 
-  graphNode.determineEditorCursorIndex(request.mousePosition);
+  graphNodeEditor.calculateMetrics(change);
+});
+*/
+
+app.ports.updateGraphNodeEditorSelection.subscribe(selectionUpdate => {
+  console.log(
+    "[JS] receiving request to updateNodeEditorSelection",
+    selectionUpdate
+  );
+
+  const graphNodeEditor = findGraphNodeEditorBy(selectionUpdate.graphNodeId);
+
+  if (selectionUpdate.type === "UpdateCursorPositionFromMouse") {
+    graphNodeEditor.updateCursorPositionFromMouse(selectionUpdate.at);
+  } else if (selectionUpdate.type === "UpdateCursorPositionFromIndex") {
+    graphNodeEditor.updateCursorPositionFromIndex(selectionUpdate.at);
+  } else if (selectionUpdate.type === "UpdateSelectionFromMouse") {
+    graphNodeEditor.updateSelectionFromMouse(
+      selectionUpdate.from,
+      selectionUpdate.to
+    );
+    /*
+  } else if (selectionUpdate.type === "EndSelection") {
+    graphNodeEditor.endSelection();
+  */
+  } else {
+    throw new Error(`Invalid update type ${selectionUpdate.type}!`);
+  }
 });

@@ -223,4 +223,6 @@ describe("Adding a new node", () => {
         );
       });
   });
+
+  // TODO: Selecting text using the mouse
 });
