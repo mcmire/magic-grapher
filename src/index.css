@@ -62,6 +62,10 @@ body {
   animation-name: blink;
 }
 
+.selection {
+  fill: #afd8ff;
+}
+
 @keyframes blink {
   from {
     opacity: 1;

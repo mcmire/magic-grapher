@@ -481,9 +481,10 @@ nodeElement model node groupAttrs nodeAttrs =
         withPossibleOnMouseDown attrs =
             if node.content.isBeingEdited then
                 attrs
-                    ++ [ SE.on "mousedown"
-                            (D.map (MouseDownInNodeContent node.id)
-                                decodeMouseEvent
+                    ++ [ SE.preventDefaultOn "mousedown"
+                            (D.map
+                                (\msg -> ( msg, True ))
+                                (D.map (MouseDownInNodeContent node.id) decodeMouseEvent)
                             )
                        ]
 
@@ -493,32 +494,30 @@ nodeElement model node groupAttrs nodeAttrs =
         isMouseDownInContentFor nodeId =
             model.nodeContainingMouseDown == Just nodeId
 
-        {-
-           withPossibleOnMouseMove attrs =
-               if isMouseDownInContentFor node.id then
-                   case node.content.userLocation of
-                       Just userLocation ->
-                           attrs
-                               ++ [ SE.on "mousemove"
-                                       (D.map
-                                           (UpdateNodeContent node.id)
-                                           (D.map
-                                               NodeContent.updateSelectionFromMouse
-                                               decodeMouseEvent
-                                           )
-                                       )
-                                  ]
+        withPossibleOnMouseMove attrs =
+            if isMouseDownInContentFor node.id then
+                case node.content.userLocation of
+                    Just userLocation ->
+                        attrs
+                            ++ [ SE.on "mousemove"
+                                    (D.map
+                                        (UpdateNodeContent node.id)
+                                        (D.map
+                                            NodeContent.updateSelectionFromMouse
+                                            decodeMouseEvent
+                                        )
+                                    )
+                               ]
 
-                       Nothing ->
-                           attrs
+                    Nothing ->
+                        attrs
 
-               else
-                   attrs
-        -}
+            else
+                attrs
     in
     S.g
         (withPossibleOnMouseDown groupAttrs
-            --++ withPossibleOnMouseMove groupAttrs
+            ++ withPossibleOnMouseMove groupAttrs
             ++ [ SA.transform
                     ("translate("
                         ++ String.fromFloat node.pos.x

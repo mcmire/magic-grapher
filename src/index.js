@@ -52,10 +52,12 @@ class GraphNodeEditor {
   }
 
   _updateCursorPositionFromMouse(mousePosition) {
-    const cursorIndex = this._findCursorIndexAt(mousePosition);
+    const text = this.element.textContent;
+    const cursorIndex = this._findCursorIndexAt(mousePosition, text);
+
     this._calculateMetrics({
       cursor: cursorIndex,
-      text: this.element.textContent
+      text: text
     });
   }
 
@@ -66,17 +68,17 @@ class GraphNodeEditor {
     });
   }
 
-  /*
   _updateSelectionFromMouse(fromCursorIndex, toMousePosition) {
-    const toCursorIndex = this._findCursorIndexAt(toMousePosition);
+    const text = this.element.textContent;
+    const toCursorIndex = this._findCursorIndexAt(toMousePosition, text);
+
     this._calculateMetrics({
       selection: { start: fromCursorIndex, end: toCursorIndex },
-      text: this.element.textContent
+      text: text
     });
   }
-  */
 
-  _findCursorIndexAt(mousePosition) {
+  _findCursorIndexAt(mousePosition, text) {
     const absoluteBbox = this.element.getBoundingClientRect();
     console.log("absoluteBbox", absoluteBbox);
     const relativeBbox = this.element.getBBox();
@@ -107,8 +109,13 @@ class GraphNodeEditor {
       relativizedNormalizedMousePosition.y
     );
 
-    if (relativizedNormalizedMousePosition.x === 0) {
+    if (relativizedNormalizedMousePosition.x === relativeBbox.x) {
       return -1;
+    } else if (
+      relativizedNormalizedMousePosition.x ===
+      relativeBbox.x + relativeBbox.width
+    ) {
+      return text.length - 1;
     } else {
       const point = this.root.createSVGPoint();
       point.x = relativizedNormalizedMousePosition.x;
@@ -300,6 +307,14 @@ function isGraphNodeElement(node) {
   );
 }
 
+function isGraphNodeEditorElement(node) {
+  return (
+    node.dataset != null &&
+    node.dataset.id === "graph-node-editor" &&
+    node.dataset.graphNodeId != null
+  );
+}
+
 function isInterestingKeyEvent(event) {
   return (
     event.key === "Escape" ||
@@ -349,13 +364,6 @@ const svgTextElementAddedObserver = new MutationObserver(mutations => {
     numMutations++;
 
     if (mutation.type === "childList") {
-      mutation.removedNodes.forEach(node => {
-        if (isGraphNodeElement(node)) {
-          console.log(`[JS] removing graph node: ${node.dataset.graphNodeId}`);
-          delete graphNodeEditors[node.dataset.graphNodeId];
-        }
-      });
-
       mutation.addedNodes.forEach(node => {
         //console.log("node", node);
 
@@ -370,6 +378,14 @@ const svgTextElementAddedObserver = new MutationObserver(mutations => {
           );
           graphNodeEditors[node.dataset.graphNodeId] = graphNodeEditor;
           graphNodeEditor.fireInitEvent();
+        } else if (isGraphNodeEditorElement(node)) {
+          console.log(
+            `[JS] updating graph node editor: ${node.dataset.graphNodeId}`
+          );
+          const graphNodeEditor = findGraphNodeEditorBy(
+            node.dataset.graphNodeId
+          );
+          graphNodeEditor.element = node;
         }
       });
     }

@@ -9,9 +9,8 @@ port module NodeContent exposing
     , startEditing
     , subscriptions
     , update
-    ,  updateCursorPositionFromMouse
-       --, updateSelectionFromMouse
-
+    , updateCursorPositionFromMouse
+    , updateSelectionFromMouse
     , view
     )
 
@@ -63,12 +62,7 @@ type alias SelectionRange =
 
 type UserLocation
     = Cursor SelectionLocation
-
-
-
-{-
-   | Selection SelectionRange
--}
+    | Selection SelectionRange
 
 
 type alias Model =
@@ -120,10 +114,10 @@ type Change
 type QueuedSelectionUpdate
     = UpdateCursorPositionFromMouse Position
     | UpdateCursorPositionFromIndex Int
+    | UpdateSelectionFromMouse Position
 
 
 
---| UpdateSelectionFromMouse Position
 --| EndSelection
 
 
@@ -238,8 +232,9 @@ update msg model =
                     in
                     ( model, cmd )
 
-                --Just (Selection _) ->
-                --( model, Cmd.none )
+                Just (Selection _) ->
+                    ( model, Cmd.none )
+
                 Nothing ->
                     ( model, Cmd.none )
 
@@ -285,27 +280,25 @@ encodeUpdateGraphNodeEditorSelectionRequest model selectionUpdate =
                              )
                            ]
 
-        {-
-           UpdateSelectionFromMouse newPos ->
-               case model.userLocation of
-                   Just userLocation ->
-                       attrs
-                           ++ [ ( "type", E.string "UpdateSelectionFromMouse" )
-                              , ( "from"
-                                , E.int (flattenUserLocation userLocation).index
-                                )
-                              , ( "to"
-                                , E.object
-                                   [ ( "x", E.float newPos.x )
-                                   , ( "y", E.float newPos.y )
+                UpdateSelectionFromMouse newPos ->
+                    case model.userLocation of
+                        Just userLocation ->
+                            attrs
+                                ++ [ ( "type", E.string "UpdateSelectionFromMouse" )
+                                   , ( "from"
+                                     , E.int (flattenUserLocation userLocation).index
+                                     )
+                                   , ( "to"
+                                     , E.object
+                                        [ ( "x", E.float newPos.x )
+                                        , ( "y", E.float newPos.y )
+                                        ]
+                                     )
                                    ]
-                                )
-                              ]
-        -}
-        {-
-           Nothing ->
-               attrs
-        -}
+
+                        Nothing ->
+                            attrs
+
         --EndSelection ->
         --attrs ++ [ ( "type", E.string "EndSelection" ) ]
     in
@@ -320,8 +313,9 @@ encodeUpdateGraphNodeEditorSelectionRequest model selectionUpdate =
 flattenUserLocation : UserLocation -> SelectionLocation
 flattenUserLocation userLocation =
     case userLocation of
-        --Selection range ->
-        --range.start
+        Selection range ->
+            range.start
+
         Cursor loc ->
             loc
 
@@ -504,12 +498,12 @@ updateCursorPositionFromMouse pos =
     QueueSelectionUpdate (UpdateCursorPositionFromMouse pos)
 
 
+updateSelectionFromMouse : Position -> Msg
+updateSelectionFromMouse pos =
+    QueueSelectionUpdate (UpdateSelectionFromMouse pos)
 
-{-
-   updateSelectionFromMouse : Position -> Msg
-   updateSelectionFromMouse pos =
-       QueueSelectionUpdate (UpdateSelectionFromMouse pos)
--}
+
+
 {-
    endSelection : Msg
    endSelection =
@@ -526,8 +520,11 @@ view model attrs =
 
         cursorViews =
             cursorView model attrs
+
+        selectionViews =
+            selectionView model attrs
     in
-    S.g [] (textViews ++ cursorViews)
+    S.g [] (selectionViews ++ textViews ++ cursorViews)
 
 
 textView : Model -> List (S.Attribute Msg) -> S.Svg Msg
@@ -575,34 +572,30 @@ decodeMetricsRecalculatedEvent =
             (D.field "width" D.float)
             (D.field "height" D.float)
             (D.field "userLocation"
-                --(D.oneOf
-                --[
-                (D.map
-                    Cursor
-                    (D.map2 SelectionLocation
-                        (D.field "index" D.int)
-                        (D.field "position" D.float)
-                    )
+                (D.oneOf
+                    [ D.map
+                        Cursor
+                        (D.map2 SelectionLocation
+                            (D.field "index" D.int)
+                            (D.field "position" D.float)
+                        )
+                    , D.map Selection
+                        (D.map2 SelectionRange
+                            (D.field "start"
+                                (D.map2 SelectionLocation
+                                    (D.field "index" D.int)
+                                    (D.field "position" D.float)
+                                )
+                            )
+                            (D.field "end"
+                                (D.map2 SelectionLocation
+                                    (D.field "index" D.int)
+                                    (D.field "position" D.float)
+                                )
+                            )
+                        )
+                    ]
                 )
-             {-
-                , D.map Selection
-                    (D.map2 SelectionRange
-                        (D.field "start"
-                            (D.map2 SelectionLocation
-                                (D.field "index" D.int)
-                                (D.field "position" D.float)
-                            )
-                        )
-                        (D.field "end"
-                            (D.map2 SelectionLocation
-                                (D.field "index" D.int)
-                                (D.field "position" D.float)
-                            )
-                        )
-                    )
-             -}
-             --]
-             --)
             )
             (D.field "text" D.string)
         )
@@ -633,14 +626,14 @@ cursorView : Model -> List (S.Attribute msg) -> List (S.Svg msg)
 cursorView model attrs =
     if model.isBeingEdited then
         case model.userLocation of
-            Just (Cursor cursor) ->
+            Just (Cursor loc) ->
                 let
                     -- TODO: Use
                     nodePadding =
                         10.0
                 in
                 [ S.rect
-                    [ SA.x (String.fromFloat cursor.position)
+                    [ SA.x (String.fromFloat loc.position)
                     , SA.y (String.fromFloat (-model.fontSize / 2))
                     , SA.width "2"
                     , SA.height (String.fromFloat model.fontSize)
@@ -652,9 +645,37 @@ cursorView model attrs =
                     []
                 ]
 
-            --Just (Selection _) ->
-            --[]
-            Nothing ->
+            _ ->
+                []
+
+    else
+        []
+
+
+selectionView : Model -> List (S.Attribute msg) -> List (S.Svg msg)
+selectionView model attrs =
+    if model.isBeingEdited then
+        case model.userLocation of
+            Just (Selection range) ->
+                let
+                    normalizedRange =
+                        if range.end.position > range.start.position then
+                            range
+
+                        else
+                            { start = range.end, end = range.start }
+                in
+                [ S.rect
+                    [ SA.x (String.fromFloat normalizedRange.start.position)
+                    , SA.y (String.fromFloat (-model.fontSize / 2))
+                    , SA.width (String.fromFloat (normalizedRange.end.position - normalizedRange.start.position))
+                    , SA.height (String.fromFloat model.fontSize)
+                    , SA.class "selection"
+                    ]
+                    []
+                ]
+
+            _ ->
                 []
 
     else
