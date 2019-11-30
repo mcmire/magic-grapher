@@ -1,10 +1,11 @@
 {
     "type": "application",
-    "source-directories": ["src"],
+    "source-directories": [
+        "src"
+    ],
     "elm-version": "0.19.1",
     "dependencies": {
         "direct": {
-            "Gizra/elm-debouncer": "2.0.0",
             "Gizra/elm-keyboard-event": "1.0.1",
             "SwiftsNamesake/proper-keyboard": "4.0.0",
             "elm/browser": "1.0.1",

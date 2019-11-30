@@ -5,7 +5,6 @@ import Browser.Dom as Dom exposing (Viewport)
 import Browser.Events as BE
 import Color exposing (hsla)
 import Color.Convert exposing (colorToCssHsla)
-import Debouncer.Messages as Debouncer exposing (Debouncer)
 import Html as H
 import Html.Attributes as HA
 import Html.Events as HE
@@ -66,7 +65,6 @@ type alias Model =
     { state : State
     , viewbox : Dimensions
     , mouse : { pos : Maybe Position, cursor : String }
-    , debouncer : Debouncer Msg
     , nodes : NodeCollection
     , nodeContainingMouseDown : Maybe NodeId
     , errorMessages : List String
@@ -78,7 +76,6 @@ init _ =
     ( { state = WaitingForFirstAction
       , viewbox = Dimensions 0 0
       , mouse = { pos = Nothing, cursor = "normal" }
-      , debouncer = Debouncer.toDebouncer (Debouncer.throttle 250)
       , nodes = NodeCollection.empty
       , nodeContainingMouseDown = Nothing
       , errorMessages = []
@@ -94,7 +91,6 @@ init _ =
 type Msg
     = AdjustViewboxFromInitial Viewport
     | AdjustViewboxFromResize Int Int
-    | DebounceMsg (Debouncer.Msg Msg)
     | DisplayCouldNotFindNodeError NodeId
     | DisplayDecodeError D.Error
     | DoNothing
@@ -105,14 +101,6 @@ type Msg
     | UpdateNodeContent NodeId NodeContent.Msg
     | TrackMouseMovementAt Position
     | WaitForNodeToBePlaced
-
-
-updateDebouncer : Debouncer.UpdateConfig Msg Model
-updateDebouncer =
-    { mapMsg = DebounceMsg
-    , getDebouncer = .debouncer
-    , setDebouncer = \debouncer model -> { model | debouncer = debouncer }
-    }
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -129,9 +117,6 @@ update msg model =
             ( { model | viewbox = Dimensions (toFloat width) (toFloat height) }
             , Cmd.none
             )
-
-        DebounceMsg subMsg ->
-            Debouncer.update update updateDebouncer subMsg model
 
         DisplayCouldNotFindNodeError nodeId ->
             ( { model
@@ -375,24 +360,13 @@ constantSvgAttributes model =
     ]
 
 
-debouncedVersionOf : (a -> Msg) -> (a -> Msg)
-debouncedVersionOf wrapInMsg a =
-    --DebounceMsg (Debouncer.provideInput (wrapInMsg a))
-    wrapInMsg a
-
-
 svgAttributesWhileNoNodeIsBeingEdited : Model -> List (S.Attribute Msg)
 svgAttributesWhileNoNodeIsBeingEdited model =
     if NodeCollection.anyBeingEdited model.nodes then
         []
 
     else
-        [ SE.on "mousemove"
-            (D.map
-                (debouncedVersionOf TrackMouseMovementAt)
-                decodeMouseEvent
-            )
-        ]
+        [ SE.on "mousemove" (D.map TrackMouseMovementAt decodeMouseEvent) ]
 
 
 svgAttributesWhileWaitingForNodeToBePlaced : Model -> List (S.Attribute Msg)
