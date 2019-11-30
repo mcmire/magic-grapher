@@ -460,18 +460,6 @@ findWordsIn text =
         matches
 
 
-
-{-
-   encodeCalculateGraphNodeContentMetricsRequest : NodeId -> Int -> E.Value
-   encodeCalculateGraphNodeContentMetricsRequest nodeId cursorIndex =
-       E.object
-           [ ( "graphNodeId", NodeId.encode nodeId )
-           , ( "cursorSelectionAsIndices", E.int cursorIndex )
-           , ( "text", E.string model.text )
-           ]
--}
-
-
 mapToDisplayDecodeError : Msg -> Maybe D.Error
 mapToDisplayDecodeError msg =
     case msg of
@@ -638,9 +626,10 @@ cursorView model attrs =
                     , SA.width "2"
                     , SA.height (String.fromFloat model.fontSize)
                     , SA.shapeRendering "crispEdges"
-                    , SA.class "blink"
                     , HA.attribute "data-testid" "cursor"
-                    , SA.class "cursor"
+                    , SA.class "cursor hidden"
+                    , HA.attribute "data-id" "graph-node-editor-cursor"
+                    , HA.attribute "data-graph-node-id" (String.fromInt model.nodeId)
                     ]
                     []
                 ]

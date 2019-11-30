@@ -4,13 +4,78 @@ import { Elm } from "./Main.elm";
 
 // TODO: Convert to TypeScript
 
+function startBlinking(getElement) {
+  const DURATION = 525;
+  let isRunning = true;
+  let timer;
+
+  function blink() {
+    getElement().classList.toggle("hidden");
+
+    if (isRunning) {
+      timer = setTimeout(blink, DURATION);
+    } else {
+      clearTimeout(timer);
+    }
+  }
+
+  function stop() {
+    isRunning = false;
+  }
+
+  function reset() {
+    isRunning = false;
+    clearTimeout(timer);
+    getElement().classList.remove("hidden");
+    timer = setTimeout(blink, DURATION);
+    isRunning = true;
+  }
+
+  blink();
+
+  return { stop, reset };
+}
+
+class Cursor {
+  constructor(element) {
+    this.element = element;
+  }
+
+  update(element) {
+    this.element = element;
+    this.blinker.reset();
+  }
+
+  activate() {
+    this.blinker = startBlinking(() => this.element);
+  }
+
+  deactivate() {
+    this.blinker.stop();
+  }
+
+  reset() {
+    this.blinker.reset();
+  }
+}
+
 class GraphNodeEditor {
   constructor(root, graphNodeId, element) {
     this.root = root;
     this.graphNodeId = graphNodeId;
     this.element = element;
 
+    this.cursor = null;
     this.updateQueue = [];
+  }
+
+  setCursor(cursorElement) {
+    if (this.cursor == null) {
+      this.cursor = new Cursor(cursorElement);
+      this.cursor.activate();
+    } else {
+      this.cursor.update(cursorElement);
+    }
   }
 
   fireInitEvent() {
@@ -23,6 +88,18 @@ class GraphNodeEditor {
     console.log("[JS] dispatching key event");
     const event = new CustomEvent("key", { detail: originalEvent });
     this.element.dispatchEvent(event);
+  }
+
+  deactivateCursor() {
+    this.cursor.deactivate();
+  }
+
+  activateCursor() {
+    this.cursor.activate();
+  }
+
+  resetCursor() {
+    this.cursor.reset();
   }
 
   enqueueUpdate(update) {
@@ -315,6 +392,14 @@ function isGraphNodeEditorElement(node) {
   );
 }
 
+function isGraphNodeCursorElement(node) {
+  return (
+    node.dataset != null &&
+    node.dataset.id === "graph-node-editor-cursor" &&
+    node.dataset.graphNodeId != null
+  );
+}
+
 function isInterestingKeyEvent(event) {
   return (
     event.key === "Escape" ||
@@ -386,6 +471,14 @@ const svgTextElementAddedObserver = new MutationObserver(mutations => {
             node.dataset.graphNodeId
           );
           graphNodeEditor.element = node;
+        } else if (isGraphNodeCursorElement(node)) {
+          console.log(
+            `[JS] updating graph node editor cursor: ${node.dataset.graphNodeId}`
+          );
+          const graphNodeEditor = findGraphNodeEditorBy(
+            node.dataset.graphNodeId
+          );
+          graphNodeEditor.setCursor(node);
         }
       });
     }
@@ -455,20 +548,6 @@ app.ports.stopListeningForNodeEditorKeyEvent.subscribe(() => {
   keydownEventListener = null;
 });
 
-// TODO: Rename this to calculateNodeEditorMetrics??
-/*
-app.ports.calculateGraphNodeContentMetrics.subscribe(change => {
-  console.log(
-    "[JS] receiving request to calculateGraphNodeContentMetrics",
-    change
-  );
-
-  const graphNodeEditor = findGraphNodeEditorBy(change.graphNodeId);
-
-  graphNodeEditor._calculateMetrics(change);
-});
-*/
-
 app.ports.updateGraphNodeEditorSelection.subscribe(update => {
   console.log("[JS] receiving request to updateNodeEditorSelection", update);
 
@@ -483,4 +562,5 @@ app.ports.updateGraphNodeEditorSelection.subscribe(update => {
   // TODO: Put these back together
   graphNodeEditor.enqueueUpdate(update);
   graphNodeEditor.runUpdateQueue();
+  graphNodeEditor.resetCursor();
 });
