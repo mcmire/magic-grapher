@@ -118,10 +118,8 @@ class GraphNodeEditor {
         this._updateCursorPositionFromIndex(update.at, update.text);
       } else if (update.type === "UpdateSelectionFromMouse") {
         this._updateSelectionFromMouse(update.from, update.to);
-        /*
-      } else if (update.type === "EndSelection") {
-        graphNodeEditor.endSelection();
-      */
+      } else if (update.type === "UpdateSelectionFromIndex") {
+        this._updateSelectionFromIndex(update.from, update.to, update.anchor);
       } else {
         throw new Error(`Invalid update type ${update.type}!`);
       }
@@ -150,8 +148,15 @@ class GraphNodeEditor {
     const toCursorIndex = this._findCursorIndexAt(toMousePosition, text);
 
     this._calculateMetrics({
-      selection: { start: fromCursorIndex, end: toCursorIndex },
+      selection: { start: fromCursorIndex, end: toCursorIndex, anchor: null },
       text: text
+    });
+  }
+
+  _updateSelectionFromIndex(fromCursorIndex, toCursorIndex, anchor) {
+    this._calculateMetrics({
+      selection: { start: fromCursorIndex, end: toCursorIndex, anchor: anchor },
+      text: this.element.textContent
     });
   }
 
@@ -232,7 +237,7 @@ class GraphNodeEditor {
 
   // request
   // = { cursor : Int, text : String }
-  // | { selection : { start : Int, end : Int }, text : String }
+  // | { selection : { start : Int, end : Int, anchor : Maybe Anchor }, text : String }
   _calculateMetrics({ cursor, selection, text }) {
     console.log(
       "[JS] calculating metrics!",
@@ -282,7 +287,8 @@ class GraphNodeEditor {
 
       userLocation = {
         start: { index: normalizedStartIndex, position: startPosition },
-        end: { index: normalizedEndIndex, position: endPosition }
+        end: { index: normalizedEndIndex, position: endPosition },
+        anchor: selection.anchor
       };
     } else if (cursor != null) {
       const normalizedIndex = this._normalizeCursorIndex({

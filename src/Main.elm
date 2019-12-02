@@ -66,7 +66,7 @@ type alias Model =
     , viewbox : Dimensions
     , mouse : { pos : Maybe Position, cursor : String }
     , nodes : NodeCollection
-    , nodeContainingMouseDown : Maybe NodeId
+    , possibleNodeIdContainingMouseDown : Maybe NodeId
     , errorMessages : List String
     }
 
@@ -77,7 +77,7 @@ init _ =
       , viewbox = Dimensions 0 0
       , mouse = { pos = Nothing, cursor = "normal" }
       , nodes = NodeCollection.empty
-      , nodeContainingMouseDown = Nothing
+      , possibleNodeIdContainingMouseDown = Nothing
       , errorMessages = []
       }
     , Task.perform AdjustViewboxFromInitial Dom.getViewport
@@ -95,7 +95,7 @@ type Msg
     | DisplayDecodeError D.Error
     | DoNothing
     | MouseDownInNodeContent NodeId Position
-    | MouseUp
+    | MouseUp NodeId
     | PlaceNodeAt Position
     | ReturnToWaitingForFirstAction
     | UpdateNodeContent NodeId NodeContent.Msg
@@ -138,15 +138,12 @@ update msg model =
         MouseDownInNodeContent nodeId pos ->
             update
                 (UpdateNodeContent nodeId (NodeContent.updateCursorPositionFromMouse pos))
-                { model | nodeContainingMouseDown = Just nodeId }
+                { model | possibleNodeIdContainingMouseDown = Just nodeId }
 
-        MouseUp ->
-            let
-                _ =
-                    Debug.log "Mouse UP!"
-            in
-            -- TODO: End the selection
-            ( { model | nodeContainingMouseDown = Nothing }, Cmd.none )
+        MouseUp nodeId ->
+            update
+                (UpdateNodeContent nodeId NodeContent.endSelection)
+                { model | possibleNodeIdContainingMouseDown = Nothing }
 
         PlaceNodeAt pos ->
             let
@@ -381,9 +378,9 @@ svgAttributesWhileWaitingForNodeToBePlaced model =
 
 svgAttributesWhileMouseIsDownWithinNodeContent : Model -> List (S.Attribute Msg)
 svgAttributesWhileMouseIsDownWithinNodeContent model =
-    case model.nodeContainingMouseDown of
-        Just _ ->
-            [ SE.on "mouseup" (D.succeed MouseUp) ]
+    case model.possibleNodeIdContainingMouseDown of
+        Just nodeId ->
+            [ SE.on "mouseup" (D.succeed (MouseUp nodeId)) ]
 
         Nothing ->
             []
@@ -466,12 +463,12 @@ nodeElement model node groupAttrs nodeAttrs =
                 attrs
 
         isMouseDownInContentFor nodeId =
-            model.nodeContainingMouseDown == Just nodeId
+            model.possibleNodeIdContainingMouseDown == Just nodeId
 
         withPossibleOnMouseMove attrs =
             if isMouseDownInContentFor node.id then
-                case node.content.userLocation of
-                    Just userLocation ->
+                case node.content.possibleUserLocation of
+                    Just _ ->
                         attrs
                             ++ [ SE.on "mousemove"
                                     (D.map

@@ -18,12 +18,15 @@ body {
   position: fixed;
   top: 0px;
   right: 0px;
+  overflow-y: auto;
+  max-height: 100vh;
 }
 
 .errors {
   background-color: silver;
   border-left: 1px solid red;
   border-bottom: 1px solid red;
+  margin-top: 10px;
 }
 
 .errors__header {

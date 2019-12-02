@@ -218,7 +218,7 @@ describe("Adding a new node", () => {
 
         getNodeEditorCursor().should(
           "have.position",
-          positions[2].start.x,
+          positions[2].end.x,
           expectedY
         );
       });

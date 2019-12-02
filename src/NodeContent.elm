@@ -1,9 +1,8 @@
 port module NodeContent exposing
     ( Model
     , Msg
-    ,  doNothing
-       --, endSelection
-
+    , doNothing
+    , endSelection
     , init
     , mapToDisplayDecodeError
     , startEditing
@@ -22,7 +21,6 @@ import Json.Encode as E
 import Keyboard.Event exposing (KeyboardEvent, decodeKeyboardEvent)
 import Keyboard.Key as Key
 import List
-import List.Extra
 import Maybe.Extra
 import NodeId exposing (NodeId)
 import Regex
@@ -31,6 +29,13 @@ import Svg as S
 import Svg.Attributes as SA
 import Svg.Events as SE
 import Types exposing (Position, Range)
+import WordFinding
+    exposing
+        ( findNearestWordDownFrom
+        , findNearestWordUpFrom
+        , findSurroundingWord
+        , findWordsIn
+        )
 
 
 port calculateGraphNodeContentMetrics : E.Value -> Cmd msg
@@ -56,13 +61,37 @@ type alias SelectionLocation =
     { index : Int, position : Float }
 
 
-type alias SelectionRange =
-    { start : SelectionLocation, end : SelectionLocation }
+type Anchor
+    = Start
+    | End
+
+
+anchorToString : Anchor -> String
+anchorToString anchor =
+    case anchor of
+        Start ->
+            "Start"
+
+        End ->
+            "End"
+
+
+decodeAnchor : String -> D.Decoder Anchor
+decodeAnchor anchor =
+    case anchor of
+        "Start" ->
+            D.succeed Start
+
+        "End" ->
+            D.succeed End
+
+        _ ->
+            D.fail "Anchor must be Start or End"
 
 
 type UserLocation
     = Cursor SelectionLocation
-    | Selection SelectionRange
+    | Selection SelectionLocation SelectionLocation (Maybe Anchor)
 
 
 type alias Model =
@@ -72,12 +101,8 @@ type alias Model =
     , height : Float
     , fontSize : Float
     , isBeingEdited : Bool
-    , userLocation : Maybe UserLocation
+    , possibleUserLocation : Maybe UserLocation
     }
-
-
-type alias Word =
-    { startIndex : Int, endIndex : Int }
 
 
 init : NodeId -> Model
@@ -92,7 +117,7 @@ init nodeId =
     , height = 0
     , fontSize = 16.0
     , isBeingEdited = False
-    , userLocation = Nothing
+    , possibleUserLocation = Nothing
     }
 
 
@@ -100,25 +125,38 @@ init nodeId =
 -- UPDATE
 
 
+type Direction
+    = Left
+    | Right
+
+
+type Unit
+    = Char
+    | Word
+
+
+type SideOfLine
+    = BeginningOfLine
+    | EndOfLine
+
+
+type Movement
+    = JumpingBy Unit Direction
+    | JumpingTo SideOfLine
+
+
 type Change
     = InsertCharacter String
     | RemovePreviousCharacter
-    | MoveCursorLeftByChar
-    | MoveCursorLeftByWord
-    | MoveCursorRightByChar
-    | MoveCursorRightByWord
-    | MoveCursorToBeginningOfLine
-    | MoveCursorToEndOfLine
+    | MoveCursor Movement
+    | MoveSelection Movement
 
 
 type QueuedSelectionUpdate
     = UpdateCursorPositionFromMouse Position
     | UpdateCursorPositionFromIndex Int
     | UpdateSelectionFromMouse Position
-
-
-
---| EndSelection
+    | UpdateSelectionFromIndex Int Int Anchor
 
 
 type alias MetricsRecalculatedEvent =
@@ -133,20 +171,40 @@ type alias MetricsRecalculatedEvent =
 type Msg
     = DisplayDecodeError D.Error
     | DoNothing
+    | EndSelection
+    | QueueSelectionUpdate QueuedSelectionUpdate
     | ReceiveRecalculatedMetrics MetricsRecalculatedEvent
     | StartEditing
     | StopEditing
     | UpdateEditor Change
-    | QueueSelectionUpdate QueuedSelectionUpdate
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        EndSelection ->
+            let
+                newModel =
+                    case model.possibleUserLocation of
+                        Just (Selection start end possibleAnchor) ->
+                            if start.index > end.index then
+                                { model
+                                    | possibleUserLocation =
+                                        Just (Selection end start possibleAnchor)
+                                }
+
+                            else
+                                model
+
+                        _ ->
+                            model
+            in
+            ( newModel, Cmd.none )
+
         StartEditing ->
             ( { model
                 | isBeingEdited = True
-                , userLocation = Just (Cursor { index = 0, position = 0 })
+                , possibleUserLocation = Just (Cursor { index = 0, position = 0 })
               }
             , startListeningForNodeEditorKeyEvent model.nodeId
             )
@@ -156,18 +214,6 @@ update msg model =
             , stopListeningForNodeEditorKeyEvent ()
             )
 
-        {-
-           MouseDown pos ->
-               ( { model | isMouseDown = True },
-               updateGraphNodeEditorSelection
-                   (encodeUpdateGraphNodeEditorSelectionRequest
-                       model.nodeId
-                       (UpdateCursorPositionFromMouse pos)
-                   )
-                )
-
-           MouseUp ->
-        -}
         QueueSelectionUpdate selectionUpdate ->
             ( model
             , updateGraphNodeEditorSelection
@@ -177,63 +223,208 @@ update msg model =
                 )
             )
 
-        -- This is just responsible for key events right now -- no mouse events
         UpdateEditor change ->
-            case model.userLocation of
-                Just (Cursor cursor) ->
+            case model.possibleUserLocation of
+                Just userLocation ->
                     let
-                        text =
+                        ( newModel, newSelectionUpdate ) =
                             case change of
                                 InsertCharacter char ->
-                                    String.Extra.insertAt char cursor.index model.text
+                                    case userLocation of
+                                        Cursor loc ->
+                                            let
+                                                text =
+                                                    String.Extra.insertAt char (loc.index + 1) model.text
+
+                                                selectionUpdate =
+                                                    UpdateCursorPositionFromIndex
+                                                        (moveCursorRightByChar
+                                                            loc.index
+                                                            text
+                                                        )
+                                            in
+                                            ( { model | text = text }, selectionUpdate )
+
+                                        Selection start end _ ->
+                                            let
+                                                text =
+                                                    String.slice 0 (start.index + 1) model.text
+                                                        ++ char
+                                                        ++ String.slice (end.index + 1) (String.length model.text) model.text
+
+                                                selectionUpdate =
+                                                    UpdateCursorPositionFromIndex (start.index + 1)
+                                            in
+                                            ( { model | text = text }, selectionUpdate )
 
                                 RemovePreviousCharacter ->
-                                    String.slice 0 (cursor.index - 1) model.text
-                                        ++ String.slice cursor.index (String.length model.text) model.text
+                                    case userLocation of
+                                        Cursor loc ->
+                                            let
+                                                text =
+                                                    String.slice 0 loc.index model.text
+                                                        ++ String.slice (loc.index + 1) (String.length model.text) model.text
 
-                                _ ->
-                                    model.text
+                                                selectionUpdate =
+                                                    UpdateCursorPositionFromIndex
+                                                        (moveCursorLeftByChar loc.index text)
+                                            in
+                                            ( { model | text = text }, selectionUpdate )
 
-                        newCursorIndex =
-                            case change of
-                                InsertCharacter char ->
-                                    moveCursorRightByChar cursor.index text
+                                        Selection start end _ ->
+                                            let
+                                                text =
+                                                    String.slice 0 (start.index + 1) model.text
+                                                        ++ String.slice (end.index + 1) (String.length model.text) model.text
 
-                                RemovePreviousCharacter ->
-                                    moveCursorLeftByChar cursor.index text
+                                                selectionUpdate =
+                                                    UpdateCursorPositionFromIndex start.index
+                                            in
+                                            ( { model | text = text }, selectionUpdate )
 
-                                MoveCursorLeftByChar ->
-                                    moveCursorLeftByChar cursor.index text
+                                MoveCursor movement ->
+                                    let
+                                        movementFn =
+                                            case movement of
+                                                JumpingBy unit Left ->
+                                                    let
+                                                        fn =
+                                                            case unit of
+                                                                Char ->
+                                                                    moveCursorLeftByChar
 
-                                MoveCursorLeftByWord ->
-                                    moveCursorLeftByWord cursor.index text
+                                                                Word ->
+                                                                    moveCursorLeftByWord
 
-                                MoveCursorRightByChar ->
-                                    moveCursorRightByChar cursor.index text
+                                                        index =
+                                                            case userLocation of
+                                                                Cursor loc ->
+                                                                    loc.index
 
-                                MoveCursorRightByWord ->
-                                    moveCursorRightByWord cursor.index text
+                                                                Selection start _ _ ->
+                                                                    start.index
+                                                    in
+                                                    fn index
 
-                                MoveCursorToBeginningOfLine ->
-                                    moveCursorToBeginningOfLine text
+                                                JumpingBy unit Right ->
+                                                    let
+                                                        fn =
+                                                            case unit of
+                                                                Char ->
+                                                                    moveCursorRightByChar
 
-                                MoveCursorToEndOfLine ->
-                                    moveCursorToEndOfLine text
+                                                                Word ->
+                                                                    moveCursorRightByWord
 
-                        selectionUpdate =
-                            UpdateCursorPositionFromIndex newCursorIndex
+                                                        index =
+                                                            case userLocation of
+                                                                Cursor loc ->
+                                                                    loc.index
+
+                                                                Selection _ end _ ->
+                                                                    end.index
+                                                    in
+                                                    fn index
+
+                                                JumpingTo BeginningOfLine ->
+                                                    moveCursorToBeginningOfLine
+
+                                                JumpingTo EndOfLine ->
+                                                    moveCursorToEndOfLine
+
+                                        selectionUpdate =
+                                            UpdateCursorPositionFromIndex (movementFn model.text)
+                                    in
+                                    ( model, selectionUpdate )
+
+                                MoveSelection movement ->
+                                    let
+                                        selectionUpdate =
+                                            case movement of
+                                                JumpingBy unit Left ->
+                                                    let
+                                                        fn =
+                                                            case unit of
+                                                                Char ->
+                                                                    moveCursorLeftByChar
+
+                                                                Word ->
+                                                                    moveCursorLeftByWord
+
+                                                        ( startIndex, endIndex, anchor ) =
+                                                            case userLocation of
+                                                                Cursor loc ->
+                                                                    ( fn loc.index model.text, loc.index, Start )
+
+                                                                Selection start end (Just End) ->
+                                                                    ( start.index, fn end.index model.text, End )
+
+                                                                Selection start end _ ->
+                                                                    ( fn start.index model.text, end.index, Start )
+                                                    in
+                                                    UpdateSelectionFromIndex startIndex endIndex anchor
+
+                                                JumpingBy unit Right ->
+                                                    let
+                                                        fn =
+                                                            case unit of
+                                                                Char ->
+                                                                    moveCursorRightByChar
+
+                                                                Word ->
+                                                                    moveCursorRightByWord
+
+                                                        ( startIndex, endIndex, anchor ) =
+                                                            case userLocation of
+                                                                Cursor loc ->
+                                                                    ( loc.index, fn loc.index model.text, End )
+
+                                                                Selection start end (Just Start) ->
+                                                                    ( fn start.index model.text, end.index, Start )
+
+                                                                Selection start end _ ->
+                                                                    ( start.index, fn end.index model.text, End )
+                                                    in
+                                                    UpdateSelectionFromIndex startIndex endIndex anchor
+
+                                                JumpingTo BeginningOfLine ->
+                                                    case userLocation of
+                                                        Cursor loc ->
+                                                            UpdateSelectionFromIndex
+                                                                (moveCursorToBeginningOfLine model.text)
+                                                                loc.index
+                                                                Start
+
+                                                        Selection _ end anchor ->
+                                                            UpdateSelectionFromIndex
+                                                                (moveCursorToBeginningOfLine model.text)
+                                                                end.index
+                                                                (Maybe.withDefault Start anchor)
+
+                                                JumpingTo EndOfLine ->
+                                                    case userLocation of
+                                                        Cursor loc ->
+                                                            UpdateSelectionFromIndex
+                                                                loc.index
+                                                                (moveCursorToEndOfLine model.text)
+                                                                End
+
+                                                        Selection start _ anchor ->
+                                                            UpdateSelectionFromIndex
+                                                                start.index
+                                                                (moveCursorToEndOfLine model.text)
+                                                                (Maybe.withDefault End anchor)
+                                    in
+                                    ( model, selectionUpdate )
 
                         cmd =
                             updateGraphNodeEditorSelection
                                 (encodeUpdateGraphNodeEditorSelectionRequest
-                                    { model | text = text }
-                                    selectionUpdate
+                                    newModel
+                                    newSelectionUpdate
                                 )
                     in
                     ( model, cmd )
-
-                Just (Selection _) ->
-                    ( model, Cmd.none )
 
                 Nothing ->
                     ( model, Cmd.none )
@@ -242,7 +433,7 @@ update msg model =
             ( { model
                 | width = event.width
                 , height = event.height
-                , userLocation = Just event.userLocation
+                , possibleUserLocation = Just event.userLocation
                 , text = event.text
               }
             , Cmd.none
@@ -281,7 +472,7 @@ encodeUpdateGraphNodeEditorSelectionRequest model selectionUpdate =
                            ]
 
                 UpdateSelectionFromMouse newPos ->
-                    case model.userLocation of
+                    case model.possibleUserLocation of
                         Just userLocation ->
                             attrs
                                 ++ [ ( "type", E.string "UpdateSelectionFromMouse" )
@@ -299,8 +490,13 @@ encodeUpdateGraphNodeEditorSelectionRequest model selectionUpdate =
                         Nothing ->
                             attrs
 
-        --EndSelection ->
-        --attrs ++ [ ( "type", E.string "EndSelection" ) ]
+                UpdateSelectionFromIndex startIndex endIndex anchor ->
+                    attrs
+                        ++ [ ( "type", E.string "UpdateSelectionFromIndex" )
+                           , ( "from", E.int startIndex )
+                           , ( "to", E.int endIndex )
+                           , ( "anchor", E.string (anchorToString anchor) )
+                           ]
     in
     E.object
         (attrsWithPossibleMousePosition
@@ -313,8 +509,8 @@ encodeUpdateGraphNodeEditorSelectionRequest model selectionUpdate =
 flattenUserLocation : UserLocation -> SelectionLocation
 flattenUserLocation userLocation =
     case userLocation of
-        Selection range ->
-            range.start
+        Selection start _ _ ->
+            start
 
         Cursor loc ->
             loc
@@ -332,6 +528,7 @@ moveCursorLeftByWord cursorIndex text =
             findWordsIn text
 
         possibleSurroundingWord =
+            -- TODO: Maybe a way to simplify this?
             case findSurroundingWord cursorIndex words of
                 Just word ->
                     if cursorIndex > word.startIndex then
@@ -346,15 +543,15 @@ moveCursorLeftByWord cursorIndex text =
         possibleWord =
             Maybe.Extra.or
                 possibleSurroundingWord
-                (findNearestWordDownFrom cursorIndex words)
+                (findNearestWordDownFrom (cursorIndex - 1) words)
 
         newCursorIndex =
             case possibleWord of
                 Just word ->
-                    word.startIndex
+                    word.startIndex - 1
 
                 Nothing ->
-                    0
+                    -1
     in
     normalizeCursorIndex newCursorIndex text
 
@@ -369,6 +566,9 @@ moveCursorRightByWord cursorIndex text =
     let
         words =
             findWordsIn text
+
+        _ =
+            Debug.log "words" words
 
         possibleSurroundingWord =
             case findSurroundingWord cursorIndex words of
@@ -385,7 +585,7 @@ moveCursorRightByWord cursorIndex text =
         possibleWord =
             Maybe.Extra.or
                 possibleSurroundingWord
-                (findNearestWordUpFrom cursorIndex words)
+                (findNearestWordUpFrom (cursorIndex + 1) words)
 
         newCursorIndex =
             case possibleWord of
@@ -393,40 +593,19 @@ moveCursorRightByWord cursorIndex text =
                     word.endIndex
 
                 Nothing ->
-                    String.length text
+                    String.length text - 1
     in
     normalizeCursorIndex newCursorIndex text
 
 
 moveCursorToBeginningOfLine : String -> Int
 moveCursorToBeginningOfLine text =
-    normalizeCursorIndex 0 text
+    normalizeCursorIndex -1 text
 
 
 moveCursorToEndOfLine : String -> Int
 moveCursorToEndOfLine text =
-    normalizeCursorIndex (String.length text) text
-
-
-findSurroundingWord : Int -> List Word -> Maybe Word
-findSurroundingWord index words =
-    List.Extra.find
-        (\word -> index >= word.startIndex && index <= word.endIndex)
-        words
-
-
-findNearestWordDownFrom : Int -> List Word -> Maybe Word
-findNearestWordDownFrom index words =
-    List.Extra.find
-        (\word -> index >= word.endIndex)
-        (List.reverse words)
-
-
-findNearestWordUpFrom : Int -> List Word -> Maybe Word
-findNearestWordUpFrom index words =
-    List.Extra.find
-        (\word -> index <= word.startIndex)
-        words
+    normalizeCursorIndex (String.length text - 1) text
 
 
 normalizeCursorIndex : Int -> String -> Int
@@ -439,25 +618,6 @@ normalizeCursorIndex index text =
 
     else
         index
-
-
-findWordsIn : String -> List Word
-findWordsIn text =
-    let
-        regex =
-            Maybe.withDefault Regex.never <|
-                Regex.fromString "[\\w_]+"
-
-        matches =
-            Regex.find regex text
-    in
-    List.map
-        (\match ->
-            { startIndex = match.index
-            , endIndex = match.index + String.length match.match
-            }
-        )
-        matches
 
 
 mapToDisplayDecodeError : Msg -> Maybe D.Error
@@ -491,12 +651,12 @@ updateSelectionFromMouse pos =
     QueueSelectionUpdate (UpdateSelectionFromMouse pos)
 
 
+endSelection : Msg
+endSelection =
+    EndSelection
 
-{-
-   endSelection : Msg
-   endSelection =
-       QueueSelectionUpdate EndSelection
--}
+
+
 -- VIEW
 
 
@@ -567,21 +727,20 @@ decodeMetricsRecalculatedEvent =
                             (D.field "index" D.int)
                             (D.field "position" D.float)
                         )
-                    , D.map Selection
-                        (D.map2 SelectionRange
-                            (D.field "start"
-                                (D.map2 SelectionLocation
-                                    (D.field "index" D.int)
-                                    (D.field "position" D.float)
-                                )
-                            )
-                            (D.field "end"
-                                (D.map2 SelectionLocation
-                                    (D.field "index" D.int)
-                                    (D.field "position" D.float)
-                                )
+                    , D.map3 Selection
+                        (D.field "start"
+                            (D.map2 SelectionLocation
+                                (D.field "index" D.int)
+                                (D.field "position" D.float)
                             )
                         )
+                        (D.field "end"
+                            (D.map2 SelectionLocation
+                                (D.field "index" D.int)
+                                (D.field "position" D.float)
+                            )
+                        )
+                        (D.field "anchor" (D.nullable (D.string |> D.andThen decodeAnchor)))
                     ]
                 )
             )
@@ -613,7 +772,7 @@ normalizeTextForSvgElement text =
 cursorView : Model -> List (S.Attribute msg) -> List (S.Svg msg)
 cursorView model attrs =
     if model.isBeingEdited then
-        case model.userLocation of
+        case model.possibleUserLocation of
             Just (Cursor loc) ->
                 let
                     -- TODO: Use
@@ -644,20 +803,20 @@ cursorView model attrs =
 selectionView : Model -> List (S.Attribute msg) -> List (S.Svg msg)
 selectionView model attrs =
     if model.isBeingEdited then
-        case model.userLocation of
-            Just (Selection range) ->
+        case model.possibleUserLocation of
+            Just (Selection start end _) ->
                 let
-                    normalizedRange =
-                        if range.end.position > range.start.position then
-                            range
+                    ( normalizedStart, normalizedEnd ) =
+                        if end.position > start.position then
+                            ( start, end )
 
                         else
-                            { start = range.end, end = range.start }
+                            ( end, start )
                 in
                 [ S.rect
-                    [ SA.x (String.fromFloat normalizedRange.start.position)
+                    [ SA.x (String.fromFloat normalizedStart.position)
                     , SA.y (String.fromFloat (-model.fontSize / 2))
-                    , SA.width (String.fromFloat (normalizedRange.end.position - normalizedRange.start.position))
+                    , SA.width (String.fromFloat (normalizedEnd.position - normalizedStart.position))
                     , SA.height (String.fromFloat model.fontSize)
                     , SA.class "selection"
                     ]
@@ -685,6 +844,7 @@ mapKeyboardEventToMsg model keyboardEvent =
     if model.isBeingEdited then
         case keyboardEvent.keyCode of
             Key.Escape ->
+                -- TODO: Make sure cursor goes away
                 StopEditing
 
             Key.Backspace ->
@@ -692,27 +852,46 @@ mapKeyboardEventToMsg model keyboardEvent =
                 UpdateEditor RemovePreviousCharacter
 
             Key.Left ->
-                if onlyAltKeyPressed keyboardEvent then
-                    UpdateEditor MoveCursorLeftByWord
+                if onlyShiftKeyPressed keyboardEvent then
+                    -- FIXXXXXXX
+                    UpdateEditor (MoveSelection (JumpingBy Char Left))
+
+                else if onlyAltKeyPressed keyboardEvent then
+                    UpdateEditor (MoveCursor (JumpingBy Word Left))
 
                 else if onlyMetaKeyPressed keyboardEvent then
-                    UpdateEditor MoveCursorToBeginningOfLine
+                    UpdateEditor (MoveCursor (JumpingTo BeginningOfLine))
+
+                else if shiftAltKeyPressed keyboardEvent then
+                    UpdateEditor (MoveSelection (JumpingBy Word Left))
+
+                else if shiftMetaKeyPressed keyboardEvent then
+                    UpdateEditor (MoveSelection (JumpingTo BeginningOfLine))
 
                 else if noModifierKeysPressed keyboardEvent then
-                    UpdateEditor MoveCursorLeftByChar
+                    UpdateEditor (MoveCursor (JumpingBy Char Left))
 
                 else
                     DoNothing
 
             Key.Right ->
-                if onlyAltKeyPressed keyboardEvent then
-                    UpdateEditor MoveCursorRightByWord
+                if onlyShiftKeyPressed keyboardEvent then
+                    UpdateEditor (MoveSelection (JumpingBy Char Right))
+
+                else if onlyAltKeyPressed keyboardEvent then
+                    UpdateEditor (MoveCursor (JumpingBy Word Right))
 
                 else if onlyMetaKeyPressed keyboardEvent then
-                    UpdateEditor MoveCursorToEndOfLine
+                    UpdateEditor (MoveCursor (JumpingTo EndOfLine))
+
+                else if shiftAltKeyPressed keyboardEvent then
+                    UpdateEditor (MoveSelection (JumpingBy Word Right))
+
+                else if shiftMetaKeyPressed keyboardEvent then
+                    UpdateEditor (MoveSelection (JumpingTo EndOfLine))
 
                 else if noModifierKeysPressed keyboardEvent then
-                    UpdateEditor MoveCursorRightByChar
+                    UpdateEditor (MoveCursor (JumpingBy Char Right))
 
                 else
                     DoNothing
@@ -737,16 +916,40 @@ onlyAltKeyPressed : KeyboardEvent -> Bool
 onlyAltKeyPressed keyboardEvent =
     keyboardEvent.altKey
         && not keyboardEvent.ctrlKey
-        && not keyboardEvent.metaKey
         && not keyboardEvent.shiftKey
+        && not keyboardEvent.metaKey
+
+
+shiftAltKeyPressed : KeyboardEvent -> Bool
+shiftAltKeyPressed keyboardEvent =
+    keyboardEvent.shiftKey
+        && keyboardEvent.altKey
+        && not keyboardEvent.ctrlKey
+        && not keyboardEvent.metaKey
 
 
 onlyMetaKeyPressed : KeyboardEvent -> Bool
 onlyMetaKeyPressed keyboardEvent =
-    not keyboardEvent.altKey
+    keyboardEvent.metaKey
         && not keyboardEvent.ctrlKey
-        && keyboardEvent.metaKey
+        && not keyboardEvent.altKey
         && not keyboardEvent.shiftKey
+
+
+shiftMetaKeyPressed : KeyboardEvent -> Bool
+shiftMetaKeyPressed keyboardEvent =
+    keyboardEvent.shiftKey
+        && keyboardEvent.metaKey
+        && not keyboardEvent.ctrlKey
+        && not keyboardEvent.altKey
+
+
+onlyShiftKeyPressed : KeyboardEvent -> Bool
+onlyShiftKeyPressed keyboardEvent =
+    keyboardEvent.shiftKey
+        && not keyboardEvent.ctrlKey
+        && not keyboardEvent.altKey
+        && not keyboardEvent.metaKey
 
 
 noModifierKeysPressed : KeyboardEvent -> Bool
