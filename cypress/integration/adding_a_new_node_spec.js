@@ -5,12 +5,24 @@ describe("Adding a new node", () => {
     return cy.get("body");
   }
 
+  function getViewport() {
+    return cy.get("svg");
+  }
+
+  function getNode() {
+    return cy.get("[data-testid='node']");
+  }
+
   function getNodeEditorTextBox() {
     return cy.get("svg text");
   }
 
   function getNodeEditorCursor() {
-    return cy.get("svg [data-testid='cursor']");
+    return cy.get("[data-testid='cursor']");
+  }
+
+  function getNodeEditorSelection() {
+    return cy.get("[data-testid='selection']");
   }
 
   beforeEach(() => {
@@ -32,7 +44,7 @@ describe("Adding a new node", () => {
           .should(
             "have.attr",
             "x",
-            positions[positions.length - 1].end.x.toString()
+            positions[positions.length - 1].end.relative.x.toString()
           )
           .should("have.attr", "y", expectedY);
       });
@@ -51,7 +63,7 @@ describe("Adding a new node", () => {
             .should(
               "have.attr",
               "x",
-              positions[positions.length - 3].end.x.toString()
+              positions[positions.length - 3].end.relative.x.toString()
             )
             .should("have.attr", "y", expectedY);
 
@@ -76,7 +88,7 @@ describe("Adding a new node", () => {
         getBody().type("{meta}{leftarrow}");
         getBody().type("{leftarrow}");
         getNodeEditorCursor()
-          .should("have.attr", "x", positions[0].start.x.toString())
+          .should("have.attr", "x", positions[0].start.relative.x.toString())
           .should("have.attr", "y", expectedY);
       });
   });
@@ -93,7 +105,7 @@ describe("Adding a new node", () => {
           .should(
             "have.attr",
             "x",
-            positions[positions.length - 1].end.x.toString()
+            positions[positions.length - 1].end.relative.x.toString()
           )
           .should("have.attr", "y", expectedY);
       });
@@ -111,7 +123,7 @@ describe("Adding a new node", () => {
           .should(
             "have.attr",
             "x",
-            positions[positions.length - 9].end.x.toString()
+            positions[positions.length - 9].end.relative.x.toString()
           )
           .should("have.attr", "y", expectedY);
 
@@ -189,7 +201,7 @@ describe("Adding a new node", () => {
         .then(positions => {
           getBody().type("{meta}{leftarrow}");
           getNodeEditorCursor()
-            .should("have.attr", "x", positions[0].start.x.toString())
+            .should("have.attr", "x", positions[0].start.relative.x.toString())
             .should("have.attr", "y", expectedY);
 
           getBody().type("{meta}{rightarrow}");
@@ -210,19 +222,39 @@ describe("Adding a new node", () => {
     getNodeEditorTextBox()
       .getPositions()
       .then(positions => {
-        const x1 = positions[2].end.x;
-        const x2 = positions[3].end.x;
+        const x1 = positions[2].end.absolute.x;
+        const x2 = positions[3].end.absolute.x;
         const x = x1 + (x2 - x1) * 0.3;
 
         getNodeEditorTextBox().click(x, expectedY);
 
-        getNodeEditorCursor().should(
-          "have.position",
-          positions[2].end.x,
-          expectedY
-        );
+        getNodeEditorCursor().should("have.position", {
+          x: positions[2].end.relative.x,
+          y: expectedY
+        });
       });
   });
 
-  // TODO: Selecting text using the mouse
+  specify.only("Selecting text by dragging right within the textbox", () => {
+    getBody().type("this is a tomato");
+
+    getNodeEditorTextBox()
+      .getPositions()
+      .then(positions => {
+        const pos1 = positions[0].end.absolute;
+        const pos2 = positions[6].end.absolute;
+
+        getNode().trigger("mousedown", pos1.x, expectedY);
+
+        getViewport()
+          .trigger("mousemove", pos2.x, expectedY)
+          .trigger("mouseup", pos2.x, expectedY);
+
+        getNodeEditorSelection().should(
+          "have.positionRange",
+          positions[2].end.relative,
+          positions[6].end.relative
+        );
+      });
+  });
 });

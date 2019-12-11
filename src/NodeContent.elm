@@ -819,6 +819,7 @@ selectionView model attrs =
                     , SA.width (String.fromFloat (normalizedEnd.position - normalizedStart.position))
                     , SA.height (String.fromFloat model.fontSize)
                     , SA.class "selection"
+                    , HA.attribute "data-testid" "selection"
                     ]
                     []
                 ]

@@ -496,6 +496,7 @@ nodeElement model node groupAttrs nodeAttrs =
                         ++ String.fromFloat node.pos.y
                         ++ ")"
                     )
+               , HA.attribute "data-testid" "node"
                ]
         )
         (nodeBackground node nodeAttrs
