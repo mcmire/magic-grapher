@@ -24,7 +24,7 @@
     "elm-hot": "^1.1.2",
     "elm-json": "^0.2.2",
     "node-elm-compiler": "^5.0.4",
-    "parcel": "^1.12.4",
+    "parcel": "^2.8.2",
     "prettier": "^1.18.2"
   },
   "dependencies": {
